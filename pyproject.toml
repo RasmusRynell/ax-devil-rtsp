@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ax-devil-rtsp"
+version = "0.1.0"
+description = "Python library for RTSP streaming from Axis devices"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Rasmus Rynell", email = "Rynell.Rasmus@gmail.com"},
+]
+dependencies = [
+    "click>=8.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/rasmusrynell/ax-devil-rtsp"
+Repository = "https://github.com/rasmusrynell/ax-devil-rtsp.git"
+Documentation = "https://github.com/rasmusrynell/ax-devil-rtsp#readme"
+"Bug Tracker" = "https://github.com/rasmusrynell/ax-devil-rtsp/issues"
+
+[project.scripts]
+ax-devil-rtsp = "ax_devil_rtsp.cli:cli"
