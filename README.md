@@ -8,7 +8,7 @@
 
 Python library for RTSP streaming from Axis devices
 
-See also: [ax-devil-device-api](https://github.com/ax-devil/ax-devil-device-api) and [ax-devil-mqtt](https://github.com/ax-devil/ax-devil-mqtt) for other Axis device management tools.
+See also: [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-api) and [ax-devil-mqtt](https://github.com/rasmusrynell/ax-devil-mqtt) for other Axis device management tools.
 
 </div>
 
