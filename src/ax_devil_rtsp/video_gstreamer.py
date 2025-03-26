@@ -79,48 +79,47 @@ class VideoGStreamerClient:
             logger.error("Failed to map buffer as RTP packet.")
             return Gst.PadProbeReturn.OK
 
-        result = GstRtp.RTPBuffer.get_extension_data(rtp_buffer)
-        if result is None:
-            logger.debug("No RTP extension data in packet.")
-            return Gst.PadProbeReturn.OK
-
-        ext_data, ext_id = result
-        if ext_id != 0xABAC:  # Expected ONVIF replay extension.
-            logger.debug("Received non-ONVIF extension ID: 0x%04X", ext_id)
-            return Gst.PadProbeReturn.OK
-
         try:
-            ext_bytes = ext_data.get_data() if hasattr(ext_data, "get_data") else ext_data
-        except Exception as e:
-            logger.error("Error retrieving extension data: %s", e)
-            ext_bytes = None
+            result = GstRtp.RTPBuffer.get_extension_data(rtp_buffer)
+            if result is None:
+                logger.debug("No RTP extension data in packet.")
+                return Gst.PadProbeReturn.OK
 
-        if ext_bytes and len(ext_bytes) < 12:
-            logger.warning("Extension payload too short; expected at least 12 bytes.")
-            return Gst.PadProbeReturn.OK
+            ext_data, ext_id = result
+            if ext_id != 0xABAC:  # Expected ONVIF replay extension.
+                logger.debug("Received non-ONVIF extension ID: 0x%04X", ext_id)
+                return Gst.PadProbeReturn.OK
 
-        ntp_seconds = int.from_bytes(ext_bytes[0:4], byteorder='big')
-        ntp_fraction = int.from_bytes(ext_bytes[4:8], byteorder='big')
-        unix_timestamp = self._convert_ntp_to_unix(ntp_seconds, ntp_fraction)
-        human_time = self._format_unix_timestamp(unix_timestamp)
-        flags_and_seq = int.from_bytes(ext_bytes[8:12], byteorder='big')
-        C = (flags_and_seq >> 31) & 0x01
-        E = (flags_and_seq >> 30) & 0x01
-        D = (flags_and_seq >> 29) & 0x01
-        T = (flags_and_seq >> 28) & 0x01
-        Cseq = flags_and_seq & 0xFF
-        self.latest_rtp_data = {
-            "human_time": human_time,
-            "ntp_seconds": ntp_seconds,
-            "ntp_fraction": ntp_fraction,
-            "C": C,
-            "E": E,
-            "D": D,
-            "T": T,
-            "CSeq": Cseq
-        }
+            try:
+                ext_bytes = ext_data.get_data() if hasattr(ext_data, "get_data") else ext_data
+            except Exception as e:
+                logger.error("Error retrieving extension data: %s", e)
+                return Gst.PadProbeReturn.OK
 
-        GstRtp.RTPBuffer.unmap(rtp_buffer)
+            if not ext_bytes or len(ext_bytes) < 12:
+                logger.warning("Extension payload too short; expected at least 12 bytes.")
+                return Gst.PadProbeReturn.OK
+
+            # Update RTP data even if some fields might be missing
+            ntp_seconds = int.from_bytes(ext_bytes[0:4], byteorder='big')
+            ntp_fraction = int.from_bytes(ext_bytes[4:8], byteorder='big')
+            unix_timestamp = self._convert_ntp_to_unix(ntp_seconds, ntp_fraction)
+            human_time = self._format_unix_timestamp(unix_timestamp)
+            flags_and_seq = int.from_bytes(ext_bytes[8:12], byteorder='big')
+
+            self.latest_rtp_data = {
+                "human_time": human_time,
+                "ntp_seconds": ntp_seconds,
+                "ntp_fraction": ntp_fraction,
+                "C": (flags_and_seq >> 31) & 0x01,
+                "E": (flags_and_seq >> 30) & 0x01,
+                "D": (flags_and_seq >> 29) & 0x01,
+                "T": (flags_and_seq >> 28) & 0x01,
+                "CSeq": flags_and_seq & 0xFF
+            }
+        finally:
+            GstRtp.RTPBuffer.unmap(rtp_buffer)
+        
         return Gst.PadProbeReturn.OK
 
 
@@ -230,25 +229,26 @@ class VideoGStreamerClient:
 
 
     def start(self):
-        logger.info("Starting pipeline.")
+        """
+        Start the GStreamer pipeline and run the main loop.
+        """
+        logger.info("Starting VideoGStreamerClient pipeline.")
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
             logger.error("Failed to set pipeline to PLAYING state.")
-            raise Exception("Pipeline failed to start.")
+            raise RuntimeError("Pipeline failed to start.")
         try:
             self.loop.run()
         except KeyboardInterrupt:
-            logger.info("KeyboardInterrupt received. Shutting down...")
+            logger.info("KeyboardInterrupt received. Stopping pipeline.")
         finally:
             self.stop()
 
     def stop(self):
-        logger.info("Stopping pipeline.")
+        """
+        Stop the pipeline and quit the main loop.
+        """
+        logger.info("Stopping VideoGStreamerClient pipeline.")
         self.pipeline.set_state(Gst.State.NULL)
         self.loop.quit()
         logger.info("Pipeline stopped.")
-
-
-# Example usage:
-if __name__ == "__main__":
-

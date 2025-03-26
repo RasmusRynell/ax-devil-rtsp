@@ -216,26 +216,26 @@ class AxisMetadataClient:
         """
         Start the GStreamer pipeline and run the main loop.
         """
-        logger.info("Starting pipeline.")
+        logger.info("Starting AxisMetadataClient pipeline.")
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
-            logger.error("Failed to set pipeline to PLAYING.")
-            raise Exception("Pipeline failed to start.")
+            logger.error("Failed to set pipeline to PLAYING state.")
+            raise RuntimeError("Pipeline failed to start.")
         try:
             self.loop.run()
         except KeyboardInterrupt:
             logger.info("KeyboardInterrupt received. Stopping pipeline.")
         finally:
-            self.pipeline.set_state(Gst.State.NULL)
-            logger.info("Pipeline stopped.")
+            self.stop()
 
     def stop(self):
         """
         Stop the pipeline and quit the main loop.
         """
+        logger.info("Stopping AxisMetadataClient pipeline.")
         self.pipeline.set_state(Gst.State.NULL)
         self.loop.quit()
-        logger.info("Pipeline stopped via stop() call.")
+        logger.info("Pipeline stopped.")
 
 def print_metadata(xml_text):
     """
@@ -246,9 +246,9 @@ def print_metadata(xml_text):
 
 def main():
     # Use environment variables for sensitive information.
-    username = os.getenv("RTSP_USERNAME", "root")
-    password = os.getenv("RTSP_PASSWORD", "fusion")
-    ip = os.getenv("RTSP_IP", "192.168.1.81")
+    username = os.getenv("AX_DEVIL_TARGET_USER", "root")
+    password = os.getenv("AX_DEVIL_TARGET_PASS", "fusion")
+    ip = os.getenv("AX_DEVIL_TARGET_ADDR", "192.168.1.81")
     uri = os.getenv("RTSP_URI", "axis-media/media.amp?analytics=polygon")
     rtsp_url = f"rtsp://{username}:{password}@{ip}/{uri}"
 

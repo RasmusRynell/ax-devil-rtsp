@@ -1,0 +1,37 @@
+import pytest
+from ax_devil_rtsp.metadata_gstreamer import AxisMetadataClient
+import threading
+import queue
+import time
+
+def test_metadata_client_creation(rtsp_url):
+    """Test that client can be created without errors."""
+    client = AxisMetadataClient(rtsp_url, latency=100)
+    assert client is not None
+    assert client.pipeline is not None
+
+@pytest.mark.camera_required
+def test_metadata_client_receives_data(rtsp_url):
+    """Test that client can receive metadata from camera."""
+    metadata_queue = queue.Queue()
+    
+    def callback(xml_text):
+        metadata_queue.put(xml_text)
+    
+    client = AxisMetadataClient(rtsp_url + "?analytics=polygon", 
+                              latency=100, 
+                              raw_data_callback=callback)
+    
+    # Start client in separate thread
+    thread = threading.Thread(target=client.start)
+    thread.daemon = True
+    thread.start()
+    
+    try:
+        # Wait for metadata
+        metadata = metadata_queue.get(timeout=10)
+        assert metadata is not None
+        assert '<tt:MetadataStream' in metadata
+    finally:
+        client.stop()
+        thread.join(timeout=5)

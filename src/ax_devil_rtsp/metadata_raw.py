@@ -15,6 +15,11 @@ import cv2
 import numpy as np
 from datetime import datetime
 import argparse
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # =============================
 # RTSP Protocol Client (for Metadata)
@@ -33,12 +38,12 @@ class RTSPProtocolClient:
         self.sock.connect((ip, 554))
 
     def send_request(self, request):
-        print("----- Sending Request -----")
-        print(request)
+        logger.info("----- Sending Request -----")
+        logger.info(request)
         self.sock.send(request.encode())
         response = self.sock.recv(4096).decode()
-        print("----- Received Response -----")
-        print(response)
+        logger.info("----- Received Response -----")
+        logger.info(response)
         return response
 
     def _build_request(self, method, url, extra_headers="", auth=None):
@@ -98,8 +103,8 @@ class RTSPProtocolClient:
         if sdp_start == -1:
             raise Exception("SDP not found in response.")
         sdp = resp[sdp_start:]
-        print("----- SDP Received -----")
-        print(sdp)
+        logger.info("----- SDP Received -----")
+        logger.info(sdp)
         return sdp
 
     def setup(self, track_url):
@@ -110,7 +115,7 @@ class RTSPProtocolClient:
         if not session_match:
             raise Exception("Session ID not found in SETUP response.")
         self.session_id = session_match.group(1)
-        print("RTSP Session ID:", self.session_id)
+        logger.info("RTSP Session ID: %s", self.session_id)
 
     def play(self):
         resp = self.send_rtsp("PLAY", self.base_url)
@@ -119,49 +124,70 @@ class RTSPProtocolClient:
         return resp
 
     def teardown(self):
+        """
+        Close the RTSP session and socket connection.
+        """
+        logger.info("Tearing down RTSP session.")
         try:
             resp = self.send_rtsp("TEARDOWN", self.base_url)
             if "200 OK" not in resp:
-                print("TEARDOWN failed.")
+                logger.warning("TEARDOWN failed.")
+        except Exception as e:
+            logger.error("Error during TEARDOWN: %s", e)
         finally:
             self.sock.close()
+            logger.info("RTSP session closed.")
 
-    def receive_data(self, handler_map, timeout=2.0):
-        print("Starting data stream... (Ctrl+C to exit)")
+    def receive_data(self, handler_map, stop_event=None, timeout=2.0):
+        """
+        Receive and handle RTSP/RTP data.
+        
+        Args:
+            handler_map: Dictionary mapping channel numbers to handlers
+            stop_event: Optional threading.Event for controlled shutdown
+            timeout: Socket timeout in seconds
+        """
+        logger.info("Starting data stream... (Ctrl+C to exit)")
         self.sock.settimeout(timeout)
         buffer = b""
         try:
-            while True:
+            while not (stop_event and stop_event.is_set()):
                 try:
                     data = self.sock.recv(4096)
+                    if not data:
+                        logger.info("Server closed connection.")
+                        break
+                    buffer += data
                 except socket.timeout:
                     continue
-                if not data:
-                    print("Server closed connection.")
+                except (socket.error, OSError) as e:
+                    if stop_event and stop_event.is_set():
+                        break
+                    logger.error("Socket error: %s", e)
                     break
-                buffer += data
+
                 while len(buffer) >= 4:
                     if buffer[0] == 0x24:  # '$' indicating interleaved RTP/RTCP packet
                         header = buffer[:4]
                         _, channel, length = struct.unpack("!BBH", header)
                         if len(buffer) < 4 + length:
-                            break  # Wait for full packet.
+                            break
                         packet = buffer[4:4+length]
                         buffer = buffer[4+length:]
                         if channel in handler_map:
                             handler_map[channel].handle_packet(packet)
                         else:
-                            print(f"No handler registered for channel {channel}")
+                            logger.warning("No handler registered for channel %d", channel)
                     else:
                         end_idx = buffer.find(b"\r\n\r\n")
                         if end_idx != -1:
                             msg = buffer[:end_idx+4].decode()
-                            print("RTSP Message:", msg)
+                            logger.info("RTSP Message: %s", msg)
                             buffer = buffer[end_idx+4:]
                         else:
                             break
         except KeyboardInterrupt:
-            print("Stream interrupted.")
+            logger.info("Stream interrupted.")
 
 # =============================
 # Stream Handlers
@@ -190,8 +216,8 @@ class MetadataHandler(StreamHandler):
             xml_text = xml_data.decode('utf-8')
         except UnicodeDecodeError:
             xml_text = xml_data.decode('utf-8', errors='ignore')
-        print("----- Received XML Metadata -----")
-        print(xml_text)
+        logger.info("----- Received XML Metadata -----")
+        logger.info(xml_text)
         try:
             root = ET.fromstring(xml_text)
             ns = {"tt": "http://www.onvif.org/ver10/schema", "bd": "http://www.onvif.org/ver20/analytics/humanbody"}
@@ -199,13 +225,13 @@ class MetadataHandler(StreamHandler):
                 obj_id = obj.get('ObjectId')
                 type_elem = obj.find('.//tt:Type', ns)
                 if type_elem is not None:
-                    print(f"Detected Object - ID: {obj_id}, Type: {type_elem.text}")
+                    logger.info("Detected Object - ID: %s, Type: %s", obj_id, type_elem.text)
             for frame in root.findall('.//tt:Frame', ns):
                 utc_time = frame.get('UtcTime')
                 if utc_time:
-                    print(f"UTC Time: {utc_time}")
+                    logger.info("UTC Time: %s", utc_time)
         except ET.ParseError as e:
-            print("XML Parse Error:", e)
+            logger.error("XML Parse Error: %s", e)
 
 # =============================
 # Application Entry Points
@@ -214,6 +240,10 @@ class MetadataHandler(StreamHandler):
 import os
 
 def run_metadata_client(args):
+    """
+    Run the metadata client with the provided arguments.
+    """
+    logger.info("Starting metadata client.")
     base_url = f"rtsp://{args.ip}/axis-media/media.amp?analytics=polygon"
     client = RTSPProtocolClient(args.ip, args.username, args.password, base_url)
     try:
@@ -231,7 +261,7 @@ def run_metadata_client(args):
             raise Exception("Metadata track control URL not found in SDP.")
         # Resolve relative URL if necessary.
         track_url = track_control if track_control.startswith("rtsp://") else f"{client.base_url.rstrip('/')}/{track_control}"
-        print("Metadata Track URL:", track_url)
+        logger.info("Metadata Track URL: %s", track_url)
         client.setup(track_url)
         client.play()
         handler_map = {0: MetadataHandler()}
@@ -240,14 +270,15 @@ def run_metadata_client(args):
         logger.error("Error in metadata client: %s", e)
     finally:
         client.teardown()
+        logger.info("Metadata client stopped.")
 
 def main():
     parser = argparse.ArgumentParser(
         description="RTSP Client for Axis Camera with separate Metadata streams."
     )
-    parser.add_argument("--ip", default=os.getenv("RTSP_IP", "192.168.1.81"), help="Camera IP address")
-    parser.add_argument("--username", default=os.getenv("RTSP_USERNAME", "root"), help="RTSP username")
-    parser.add_argument("--password", default=os.getenv("RTSP_PASSWORD", "fusion"), help="RTSP password")
+    parser.add_argument("--ip", default=os.getenv("AX_DEVIL_TARGET_ADDR", "192.168.1.81"), help="Camera IP address")
+    parser.add_argument("--username", default=os.getenv("AX_DEVIL_TARGET_USER", "root"), help="RTSP username")
+    parser.add_argument("--password", default=os.getenv("AX_DEVIL_TARGET_PASS", "fusion"), help="RTSP password")
     args = parser.parse_args()
 
     run_metadata_client(args)
