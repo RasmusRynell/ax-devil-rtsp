@@ -271,17 +271,3 @@ def run_metadata_client(args):
     finally:
         client.teardown()
         logger.info("Metadata client stopped.")
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="RTSP Client for Axis Camera with separate Metadata streams."
-    )
-    parser.add_argument("--ip", default=os.getenv("AX_DEVIL_TARGET_ADDR", "192.168.1.81"), help="Camera IP address")
-    parser.add_argument("--username", default=os.getenv("AX_DEVIL_TARGET_USER", "root"), help="RTSP username")
-    parser.add_argument("--password", default=os.getenv("AX_DEVIL_TARGET_PASS", "fusion"), help="RTSP password")
-    args = parser.parse_args()
-
-    run_metadata_client(args)
-
-if __name__ == "__main__":
-    main()

@@ -236,30 +236,3 @@ class AxisMetadataClient:
         self.pipeline.set_state(Gst.State.NULL)
         self.loop.quit()
         logger.info("Pipeline stopped.")
-
-def print_metadata(xml_text):
-    """
-    Process the XML metadata.
-    """
-    logger.info("Received metadata:\n%s", xml_text)
-    print(xml_text)
-
-def main():
-    # Use environment variables for sensitive information.
-    username = os.getenv("AX_DEVIL_TARGET_USER", "root")
-    password = os.getenv("AX_DEVIL_TARGET_PASS", "fusion")
-    ip = os.getenv("AX_DEVIL_TARGET_ADDR", "192.168.1.81")
-    uri = os.getenv("RTSP_URI", "axis-media/media.amp?analytics=polygon")
-    rtsp_url = f"rtsp://{username}:{password}@{ip}/{uri}"
-
-    try:
-        client = AxisMetadataClient(rtsp_url, latency=100, raw_data_callback=print_metadata)
-        client.start()
-    except Exception as e:
-        logger.error("Exception occurred: %s", e)
-        sys.exit(1)
-    finally:
-        logger.info("Shutting down AxisMetadataClient.")
-
-if __name__ == "__main__":
-    main()
