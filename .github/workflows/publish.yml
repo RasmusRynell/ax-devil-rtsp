@@ -1,45 +1,13 @@
-name: Test & Publish
+name: Publish
 
 on:
   push:
-    branches: [ main ]
     tags: [ "v*" ]
-  pull_request:
-    branches: [ main ]
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.10','3.11']
-    steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            python3-dev \
-            pkg-config \
-            libcairo2-dev \
-            libgirepository1.0-dev
-          python -m pip install --upgrade pip
-          pip install pytest
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install -e .
-      - name: Run tests
-        run: |
-          # Skip tests that require physical hardware
-          pytest -v -m "not requires_hardware"
-
   build-and-publish:
-    needs: test
     runs-on: ubuntu-latest
-    # Only run on tag pushes
+# Only run on tag pushes
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v3

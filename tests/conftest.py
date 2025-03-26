@@ -9,7 +9,7 @@ def pytest_configure(config):
     """Configure pytest with custom markers."""
     config.addinivalue_line(
         "markers",
-        "requires_hardware: mark test as needing physical hardware access"
+        "camera_required: mark test as needing physical hardware access"
     )
 
 @pytest.fixture(scope="session")
