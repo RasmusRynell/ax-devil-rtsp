@@ -11,15 +11,9 @@ import hashlib
 import struct
 import os
 import xml.etree.ElementTree as ET
-import cv2
-import numpy as np
-from datetime import datetime
-import argparse
 import logging
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("ax-devil-rtsp.metadata-raw")
 
 # =============================
 # RTSP Protocol Client (for Metadata)
@@ -38,12 +32,12 @@ class RTSPProtocolClient:
         self.sock.connect((ip, 554))
 
     def send_request(self, request):
-        logger.info("----- Sending Request -----")
-        logger.info(request)
+        logger.debug("----- Sending Request -----")
+        logger.debug(request)
         self.sock.send(request.encode())
         response = self.sock.recv(4096).decode()
-        logger.info("----- Received Response -----")
-        logger.info(response)
+        logger.debug("----- Received Response -----")
+        logger.debug(response)
         return response
 
     def _build_request(self, method, url, extra_headers="", auth=None):
@@ -103,8 +97,8 @@ class RTSPProtocolClient:
         if sdp_start == -1:
             raise Exception("SDP not found in response.")
         sdp = resp[sdp_start:]
-        logger.info("----- SDP Received -----")
-        logger.info(sdp)
+        logger.debug("----- SDP Received -----")
+        logger.debug(sdp)
         return sdp
 
     def setup(self, track_url):
@@ -115,7 +109,7 @@ class RTSPProtocolClient:
         if not session_match:
             raise Exception("Session ID not found in SETUP response.")
         self.session_id = session_match.group(1)
-        logger.info("RTSP Session ID: %s", self.session_id)
+        logger.debug("RTSP Session ID: %s", self.session_id)
 
     def play(self):
         resp = self.send_rtsp("PLAY", self.base_url)
@@ -127,16 +121,16 @@ class RTSPProtocolClient:
         """
         Close the RTSP session and socket connection.
         """
-        logger.info("Tearing down RTSP session.")
+        logger.info("Tearing down RTSP session")
         try:
             resp = self.send_rtsp("TEARDOWN", self.base_url)
             if "200 OK" not in resp:
-                logger.warning("TEARDOWN failed.")
+                logger.warning("TEARDOWN failed")
         except Exception as e:
             logger.error("Error during TEARDOWN: %s", e)
         finally:
             self.sock.close()
-            logger.info("RTSP session closed.")
+            logger.debug("RTSP session closed")
 
     def receive_data(self, handler_map, stop_event=None, timeout=2.0):
         """
@@ -147,7 +141,7 @@ class RTSPProtocolClient:
             stop_event: Optional threading.Event for controlled shutdown
             timeout: Socket timeout in seconds
         """
-        logger.info("Starting data stream... (Ctrl+C to exit)")
+        logger.info("Starting data stream...")
         self.sock.settimeout(timeout)
         buffer = b""
         try:
@@ -155,7 +149,7 @@ class RTSPProtocolClient:
                 try:
                     data = self.sock.recv(4096)
                     if not data:
-                        logger.info("Server closed connection.")
+                        logger.warning("Server closed connection")
                         break
                     buffer += data
                 except socket.timeout:
@@ -177,17 +171,17 @@ class RTSPProtocolClient:
                         if channel in handler_map:
                             handler_map[channel].handle_packet(packet)
                         else:
-                            logger.warning("No handler registered for channel %d", channel)
+                            logger.debug("No handler registered for channel %d", channel)
                     else:
                         end_idx = buffer.find(b"\r\n\r\n")
                         if end_idx != -1:
                             msg = buffer[:end_idx+4].decode()
-                            logger.info("RTSP Message: %s", msg)
+                            logger.debug("RTSP Message: %s", msg)
                             buffer = buffer[end_idx+4:]
                         else:
                             break
         except KeyboardInterrupt:
-            logger.info("Stream interrupted.")
+            logger.info("Stream interrupted")
 
 # =============================
 # Stream Handlers
@@ -216,8 +210,8 @@ class MetadataHandler(StreamHandler):
             xml_text = xml_data.decode('utf-8')
         except UnicodeDecodeError:
             xml_text = xml_data.decode('utf-8', errors='ignore')
-        logger.info("----- Received XML Metadata -----")
-        logger.info(xml_text)
+        logger.debug("----- Received XML Metadata -----")
+        logger.debug(xml_text)
         try:
             root = ET.fromstring(xml_text)
             ns = {"tt": "http://www.onvif.org/ver10/schema", "bd": "http://www.onvif.org/ver20/analytics/humanbody"}
@@ -229,15 +223,13 @@ class MetadataHandler(StreamHandler):
             for frame in root.findall('.//tt:Frame', ns):
                 utc_time = frame.get('UtcTime')
                 if utc_time:
-                    logger.info("UTC Time: %s", utc_time)
+                    logger.debug("UTC Time: %s", utc_time)
         except ET.ParseError as e:
             logger.error("XML Parse Error: %s", e)
 
 # =============================
 # Application Entry Points
 # =============================
-
-import os
 
 def run_metadata_client(args):
     """

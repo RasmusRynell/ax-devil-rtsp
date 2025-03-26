@@ -8,7 +8,7 @@ gi.require_version('Gst', '1.0')
 gi.require_version('GstRtp', '1.0')
 from gi.repository import Gst, GstRtp, GLib
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("ax-devil-rtsp.video")
 
 class VideoGStreamerClient:
     def __init__(self, rtsp_url, latency=100, frame_handler_callback=None):

@@ -14,12 +14,9 @@ from numpy.typing import NDArray
 
 from ax_devil_rtsp.metadata_gstreamer import AxisMetadataClient
 from ax_devil_rtsp.metadata_raw import run_metadata_client
+from ax_devil_rtsp.logging import configure_logging
 
-logger = logging.getLogger("ax-devil-rtsp")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+logger = logging.getLogger("ax-devil-rtsp.cli")
 
 def build_rtsp_url(args: argparse.Namespace) -> str:
     """Build RTSP URL from command line args."""
@@ -27,12 +24,13 @@ def build_rtsp_url(args: argparse.Namespace) -> str:
 
 def print_metadata(xml_text: str) -> None:
     """Log and print camera metadata."""
-    logger.info("Received metadata:\n%s", xml_text)
+    logger.debug("Received metadata:\n%s", xml_text)
     print(xml_text)
 
 def display_video_stream(args: argparse.Namespace) -> None:
     """Display RTSP video stream in a window. Press 'q' to quit."""
     rtsp_url = build_rtsp_url(args)
+    logger.debug("Attempting to open RTSP stream: %s", rtsp_url)
     cap = cv2.VideoCapture(rtsp_url)
     
     if not cap.isOpened():
@@ -43,15 +41,18 @@ def display_video_stream(args: argparse.Namespace) -> None:
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     
     if args.fullscreen:
+        logger.debug("Setting fullscreen mode")
         cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     else:
+        logger.debug("Setting window size: %dx%d", args.width, args.height)
         cv2.resizeWindow(window_name, args.width, args.height)
     
+    logger.info("Starting video stream display")
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
-                logger.error("Failed to read frame from stream")
+                logger.warning("Failed to read frame from stream")
                 break
             
             cv2.imshow(window_name, frame)
@@ -63,12 +64,14 @@ def display_video_stream(args: argparse.Namespace) -> None:
     except KeyboardInterrupt:
         logger.info("Stream display interrupted by user")
     finally:
+        logger.debug("Cleaning up video capture resources")
         cap.release()
         cv2.destroyAllWindows()
 
 def metadata_gstreamer(args: argparse.Namespace) -> None:
     """Run GStreamer-based metadata client."""
     rtsp_url = build_rtsp_url(args)
+    logger.info("Starting GStreamer metadata client")
     try:
         client = AxisMetadataClient(rtsp_url, latency=args.latency, raw_data_callback=print_metadata)
         client.start()
@@ -88,6 +91,11 @@ def cli() -> NoReturn:
         description="Axis Devil RTSP Client Tools",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
+    
+    # Add --debug flag for debug logging
+    parser.add_argument("--debug",
+                       action="store_true",
+                       help="Enable debug logging")
     
     parser.add_argument("--ip", 
                        default=os.getenv("AX_DEVIL_TARGET_ADDR", "192.168.1.81"),
@@ -132,6 +140,9 @@ def cli() -> NoReturn:
                              help="Start in fullscreen mode")
 
     args = parser.parse_args()
+
+    # Configure logging based on debug flag
+    configure_logging(level=logging.DEBUG if args.debug else logging.INFO)
 
     if args.command == 'metadata-gst':
         metadata_gstreamer(args)
