@@ -8,7 +8,8 @@ logging.basicConfig(level=logging.INFO)
 def pytest_configure(config):
     """Configure pytest with custom markers."""
     config.addinivalue_line(
-        "markers", "camera_required: mark test as requiring a physical camera"
+        "markers",
+        "requires_hardware: mark test as needing physical hardware access"
     )
 
 @pytest.fixture(scope="session")
