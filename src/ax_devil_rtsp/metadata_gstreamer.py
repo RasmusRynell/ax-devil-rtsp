@@ -8,7 +8,7 @@ import os
 
 logger = logging.getLogger("ax-devil-rtsp.metadata")
 
-class AxisMetadataClient:
+class SceneMetadataClient:
     """
     A production-ready GStreamer RTSP client for retrieving Axis Scene Metadata
     without using the GStreamer ONVIF depayloader. This version builds a pipeline
@@ -198,7 +198,7 @@ class AxisMetadataClient:
 
     def start(self):
         """Start the GStreamer pipeline and run the main loop."""
-        logger.info("Starting AxisMetadataClient pipeline")
+        logger.info("Starting SceneMetadataClient pipeline")
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
             logger.error("Failed to set pipeline to PLAYING state")
@@ -212,7 +212,7 @@ class AxisMetadataClient:
 
     def stop(self):
         """Stop the pipeline and quit the main loop."""
-        logger.info("Stopping AxisMetadataClient pipeline")
+        logger.info("Stopping SceneMetadataClient pipeline")
         self.pipeline.set_state(Gst.State.NULL)
         self.loop.quit()
         logger.debug("Pipeline stopped")

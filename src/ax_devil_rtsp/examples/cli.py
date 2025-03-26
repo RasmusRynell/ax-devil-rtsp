@@ -12,8 +12,9 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from ax_devil_rtsp.metadata_gstreamer import AxisMetadataClient
-from ax_devil_rtsp.metadata_raw import run_metadata_client
+from ax_devil_rtsp.metadata_gstreamer import SceneMetadataClient
+from ax_devil_rtsp.metadata_raw import SceneMetadataRawClient
+from ax_devil_rtsp.utils import parse_metadata_xml
 from ax_devil_rtsp.logging import configure_logging
 
 logger = logging.getLogger("ax-devil-rtsp.cli")
@@ -25,7 +26,15 @@ def build_rtsp_url(args: argparse.Namespace) -> str:
 def print_metadata(xml_text: str) -> None:
     """Log and print camera metadata."""
     logger.debug("Received metadata:\n%s", xml_text)
-    print(xml_text)
+    
+    try:
+        metadata = parse_metadata_xml(xml_text.encode('utf-8'))
+        if metadata:
+            print(f"Time: {metadata['utc_time']}")
+            for obj in metadata['objects']:
+                print(f"Object {obj['id']}: {obj['type']}")
+    except Exception as e:
+        logger.error("Error parsing metadata: %s", e)
 
 def display_video_stream(args: argparse.Namespace) -> None:
     """Display RTSP video stream in a window. Press 'q' to quit."""
@@ -73,17 +82,26 @@ def metadata_gstreamer(args: argparse.Namespace) -> None:
     rtsp_url = build_rtsp_url(args)
     logger.info("Starting GStreamer metadata client")
     try:
-        client = AxisMetadataClient(rtsp_url, latency=args.latency, raw_data_callback=print_metadata)
+        client = SceneMetadataClient(rtsp_url, latency=args.latency, raw_data_callback=print_metadata)
         client.start()
     except Exception as e:
         logger.error("Failed to start GStreamer metadata client: %s", e)
         sys.exit(1)
     finally:
-        logger.info("Shutting down AxisMetadataClient")
+        logger.info("Shutting down SceneMetadataClient")
 
 def metadata_raw(args: argparse.Namespace) -> None:
     """Run raw RTSP metadata client."""
-    run_metadata_client(args)
+    rtsp_url = build_rtsp_url(args)
+    logger.info("Starting raw metadata client")
+    try:
+        client = SceneMetadataRawClient(rtsp_url, latency=args.latency, raw_data_callback=print_metadata)
+        client.start()
+    except Exception as e:
+        logger.error("Failed to start raw metadata client: %s", e)
+        sys.exit(1)
+    finally:
+        logger.info("Shutting down SceneMetadataRawClient")
 
 def cli() -> NoReturn:
     """CLI entry point for video streaming and metadata tools."""
@@ -109,18 +127,26 @@ def cli() -> NoReturn:
     
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     
+    # Common metadata arguments
+    metadata_parent = argparse.ArgumentParser(add_help=False)
+    metadata_parent.add_argument("--uri", 
+                               default="axis-media/media.amp?analytics=polygon",
+                               help="RTSP URI path")
+    metadata_parent.add_argument("--latency",
+                               type=int,
+                               default=100,
+                               help="RTSP latency in ms")
+    metadata_parent.add_argument("--raw",
+                               action="store_true",
+                               help="Print raw XML instead of parsed metadata")
+    
     gst_parser = subparsers.add_parser('metadata-gst', 
-                                      help='GStreamer-based metadata client')
-    gst_parser.add_argument("--uri", 
-                           default="axis-media/media.amp?analytics=polygon",
-                           help="RTSP URI path")
-    gst_parser.add_argument("--latency",
-                           type=int,
-                           default=100,
-                           help="RTSP latency in ms")
+                                      help='GStreamer-based metadata client',
+                                      parents=[metadata_parent])
     
     raw_parser = subparsers.add_parser('metadata-raw',
-                                      help='Raw RTSP metadata client')
+                                      help='Raw RTSP metadata client',
+                                      parents=[metadata_parent])
 
     video_parser = subparsers.add_parser('video',
                                         help='Display video stream in a window')
