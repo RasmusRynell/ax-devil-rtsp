@@ -15,7 +15,7 @@ from numpy.typing import NDArray
 from ax_devil_rtsp.metadata_gstreamer import SceneMetadataClient
 from ax_devil_rtsp.metadata_raw import SceneMetadataRawClient
 from ax_devil_rtsp.utils import parse_metadata_xml
-from ax_devil_rtsp.logging import configure_logging
+from ax_devil_rtsp.utils import configure_logging
 
 logger = logging.getLogger("ax-devil-rtsp.cli")
 

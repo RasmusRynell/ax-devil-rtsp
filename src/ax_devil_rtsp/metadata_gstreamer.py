@@ -3,8 +3,6 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst, GLib
 import logging
-import sys
-import os
 
 logger = logging.getLogger("ax-devil-rtsp.metadata")
 
