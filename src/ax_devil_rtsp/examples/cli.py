@@ -97,7 +97,7 @@ def run_video(args):
         cv2.destroyAllWindows()
 
 
-def main():
+def cli():
     logging.basicConfig(
         level=logging.ERROR,
         format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s"
@@ -140,4 +140,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cli()
