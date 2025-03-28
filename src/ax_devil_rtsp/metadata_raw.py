@@ -1,16 +1,13 @@
-#!/usr/bin/env python3
-"""
-RTSP Client for Axis Camera Metadata streams using raw socket implementation.
-"""
-
+from collections.abc import Callable
 import socket
 import re
 import hashlib
 import struct
 import os
 import logging
+from typing import Optional
 
-logger = logging.getLogger("ax-devil-rtsp.metadata-raw")
+logger = logging.getLogger("ax-devil-rtsp.SceneMetadataRawClient")
 
 class SceneMetadataRawClient:
     """

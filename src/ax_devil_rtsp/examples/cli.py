@@ -1,16 +1,3 @@
-#!/usr/bin/env python3
-"""
-Axis Production GStreamer Client CLI
-
-This script imports and uses the production‐ready GStreamer clients from:
-  • metadata_gstreamer.py (providing SceneMetadataClient and run_scene_metadata_client_simple_example)
-  • video_gstreamer.py (providing VideoGStreamerClient, run_video_client_simple_example, and fix_colors_example_processing_fn)
-
-Usage examples:
-  $ ./cli.py metadata --username root --password fusion --ip 192.168.1.81
-  $ ./cli.py video --rtsp-url "rtsp://root:fusion@192.168.1.81/axis-media/media.amp"
-"""
-
 import argparse
 import logging
 import os
@@ -20,7 +7,7 @@ import multiprocessing
 import cv2
 
 from ax_devil_rtsp.metadata_gstreamer import run_scene_metadata_client_simple_example
-from ax_devil_rtsp.video_gstreamer import run_video_client_simple_example, fix_colors_example_processing_fn
+from ax_devil_rtsp.video_gstreamer import run_video_client_simple_example, example_processing_fn
 
 logger = logging.getLogger("axis-cli")
 
@@ -28,15 +15,18 @@ def run_metadata(args):
     """Run the metadata client and print unified payloads."""
     multiprocessing.set_start_method("spawn", force=True)
     queue = multiprocessing.Queue()
+
     # Build the RTSP URL: use --rtsp-url if provided; otherwise, construct one using credentials and the default metadata URI.
     rtsp_url = args.rtsp_url if args.rtsp_url else (
         f"rtsp://{args.username}:{args.password}@{args.ip}/axis-media/media.amp?analytics=polygon"
     )
+
     logger.info("Starting SceneMetadataClient with URL: %s", rtsp_url)
     process = multiprocessing.Process(
         target=run_scene_metadata_client_simple_example,
         args=(rtsp_url, args.latency, queue)
     )
+
     process.start()
     logger.info("Launched SceneMetadataClient subprocess with PID %d", process.pid)
     start_time = time.time()
@@ -63,15 +53,18 @@ def run_video(args):
     queue = multiprocessing.Queue()
     manager = multiprocessing.Manager()
     shared_config = manager.dict()  # Allows runtime updates to processing configuration.
+
     # Build the RTSP URL: use --rtsp-url if provided; otherwise, construct one using credentials and the default video URI.
     rtsp_url = args.rtsp_url if args.rtsp_url else (
         f"rtsp://{args.username}:{args.password}@{args.ip}/axis-media/media.amp"
     )
+
     logger.info("Starting VideoGStreamerClient with URL: %s", rtsp_url)
     process = multiprocessing.Process(
         target=run_video_client_simple_example,
-        args=(rtsp_url, args.latency, queue, fix_colors_example_processing_fn, shared_config)
+        args=(rtsp_url, args.latency, queue, example_processing_fn, shared_config)
     )
+
     process.start()
     logger.info("Launched VideoGStreamerClient subprocess with PID %d", process.pid)
     try:
@@ -81,8 +74,7 @@ def run_video(args):
                 frame = payload.get("data")
                 diagnostics = payload.get("diagnostics", {})
                 rtp_data = payload.get("latest_rtp_data", {})
-                logger.info("Received frame (shape: %s) | Diagnostics: %s | RTP Data: %s",
-                            frame.shape, diagnostics, rtp_data)
+                print(f"Received frame (shape: {frame.shape}) | Diagnostics: {diagnostics} | RTP Data: {rtp_data}")
                 cv2.imshow("Video Frame", frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
@@ -97,12 +89,7 @@ def run_video(args):
         cv2.destroyAllWindows()
 
 
-def cli():
-    logging.basicConfig(
-        level=logging.ERROR,
-        format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s"
-    )
-    
+def cli():    
     parser = argparse.ArgumentParser(
         description="Axis Production GStreamer Client CLI",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -117,6 +104,7 @@ def cli():
     parser.add_argument("--latency", type=int, default=100, help="RTSP latency in ms")
     parser.add_argument("--rtsp-url",
                         help="Full RTSP URL; overrides username, password, ip, and uri if provided")
+    parser.add_argument("--log-level", type=str, default="ERROR", help="Log level")
 
     subparsers = parser.add_subparsers(dest="command", help="Subcommand to run")
 
@@ -129,6 +117,11 @@ def cli():
     video_parser = subparsers.add_parser("video", help="Run the video client")
 
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=args.log_level,
+        format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s"
+    )
 
     if args.command == "metadata":
         run_metadata(args)

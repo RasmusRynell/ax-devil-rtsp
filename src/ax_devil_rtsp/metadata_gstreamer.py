@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""
-Production ready GStreamer client with unified diagnostics.
-
-This script connects to an RTSP source, extracts XML metadata from RTP packets,
-and returns a unified payload containing both the metadata and real-time diagnostics.
-"""
-
 import gi
 import time
 import logging
@@ -15,7 +7,7 @@ from typing import Callable, Optional, Dict, Any
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst, GLib
 
-logger = logging.getLogger("SceneMetadataClient")
+logger = logging.getLogger("ax-devil-rtsp.SceneMetadataClient")
 
 class SceneMetadataClient:
     """
@@ -288,9 +280,9 @@ if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)
     xml_queue = multiprocessing.Queue()
 
-    username = "root"
-    password = "fusion"
-    ip = "172.20.127.235"
+    username = "username"
+    password = "password"
+    ip = "ip"
 
     example_rtsp_url = f"rtsp://{username}:{password}@{ip}/axis-media/media.amp?analytics=polygon"
 

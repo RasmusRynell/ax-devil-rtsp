@@ -1,12 +1,3 @@
-#!/usr/bin/env python3
-"""
-Production-ready VideoGStreamerClient with unified diagnostics, user-supplied processing, and dynamic shared configuration.
-
-This script connects to an RTSP source, decodes H.264 video frames, and delivers each frame along with diagnostics
-and the latest RTP extension data. A user-supplied processing function is applied on every sample using a shared
-configuration that can be updated at runtime (e.g. via a UI).
-"""
-
 import logging
 import time
 from datetime import datetime, timezone
@@ -21,7 +12,7 @@ gi.require_version('Gst', '1.0')
 gi.require_version('GstRtp', '1.0')
 from gi.repository import Gst, GstRtp, GLib
 
-logger = logging.getLogger("ax-devil-rtsp.video")
+logger = logging.getLogger("ax-devil-rtsp.VideoGStreamerClient")
 
 class VideoGStreamerClient:
     """
@@ -428,13 +419,12 @@ def run_video_client_simple_example(rtsp_url: str, latency: int = 100,
     client.start()
 
 
-def fix_colors_example_processing_fn(frame: np.ndarray, config: dict) -> np.ndarray:
+def example_processing_fn(frame: np.ndarray, config: dict) -> np.ndarray:
     """
+    Important: This function runs in the same process as the gstreamer pipeline.
+
     Processing function that fixes color channels by converting from RGB to BGR.
-    
-    Since our pipeline outputs video/x-raw,format=RGB, but OpenCV expects BGR,
-    this function applies the conversion. The shared config can be used to add further
-    customizations if needed.
+    The shared config can be used to add further customizations if needed.
     """
     try:
         # Convert the frame from RGB to BGR.
@@ -458,16 +448,18 @@ if __name__ == "__main__":
     # Create a shared configuration using a Manager dict.
     manager = multiprocessing.Manager()
     shared_config = manager.dict()
-    # For this example, we don't resize but just fix the colors.
-    # The processing function will convert RGB to BGR.
-    # Users can update this dict with their own keys if needed.
+    shared_config["resize_width"] = 1920
+    shared_config["resize_height"] = 1080
     
-    # Replace with valid RTSP credentials and IP.
-    rtsp_url = "rtsp://root:fusion@172.20.127.235/axis-media/media.amp"
+    username = "username"
+    password = "password"
+    ip = "ip"
+
+    rtsp_url = f"rtsp://{username}:{password}@{ip}/axis-media/media.amp"
 
     video_process = multiprocessing.Process(
         target=run_video_client_simple_example,
-        args=(rtsp_url, 200, frame_queue, fix_colors_example_processing_fn, shared_config)
+        args=(rtsp_url, 200, frame_queue, example_processing_fn, shared_config)
     )
     video_process.start()
     logger.info("Launched VideoGStreamerClient subprocess with PID %d", video_process.pid)
@@ -478,7 +470,6 @@ if __name__ == "__main__":
                 payload = frame_queue.get(timeout=1)
                 frame = payload.get("data")
                 diagnostics = payload.get("diagnostics", {})
-                # Display the processed frame using OpenCV.
                 cv2.imshow("Video Frame", frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
