@@ -60,7 +60,7 @@ class VideoGStreamerClient:
         self.rtsp_url = rtsp_url
         self.latency = latency
         self.frame_handler_callback = frame_handler_callback
-        self.processing_fn = processing_fn if processing_fn is not None else fix_colors_processing_fn
+        self.processing_fn = processing_fn
         self.shared_config = shared_config if shared_config is not None else {}
 
         # Diagnostics and state.
