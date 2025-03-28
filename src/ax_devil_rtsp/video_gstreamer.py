@@ -21,13 +21,7 @@ gi.require_version('Gst', '1.0')
 gi.require_version('GstRtp', '1.0')
 from gi.repository import Gst, GstRtp, GLib
 
-# Configure logging.
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger("ax-devil-rtsp.video")
-
 
 class VideoGStreamerClient:
     """
@@ -451,7 +445,13 @@ def fix_colors_example_processing_fn(frame: np.ndarray, config: dict) -> np.ndar
     return fixed_frame
 
 
+# Example
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s"
+    )
+
     multiprocessing.set_start_method("spawn", force=True)
     frame_queue = multiprocessing.Queue()
 
