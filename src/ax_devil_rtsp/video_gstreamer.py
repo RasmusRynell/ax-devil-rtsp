@@ -1,5 +1,18 @@
+#!/usr/bin/env python3
+"""
+Production-ready VideoGStreamerClient with unified diagnostics, user-supplied processing, and dynamic shared configuration.
+
+This script connects to an RTSP source, decodes H.264 video frames, and delivers each frame along with diagnostics
+and the latest RTP extension data. A user-supplied processing function is applied on every sample using a shared
+configuration that can be updated at runtime (e.g. via a UI).
+"""
+
 import logging
+import time
 from datetime import datetime, timezone
+from typing import Callable, Optional, Dict, Any
+import multiprocessing
+
 import gi
 import numpy as np
 import cv2
@@ -8,68 +21,189 @@ gi.require_version('Gst', '1.0')
 gi.require_version('GstRtp', '1.0')
 from gi.repository import Gst, GstRtp, GLib
 
+# Configure logging.
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger("ax-devil-rtsp.video")
 
-class VideoGStreamerClient:
-    def __init__(self, rtsp_url, latency=100, frame_handler_callback=None):
-        """
-        Initialize the RTSP client.
 
-        Args:
-            rtsp_url (str): The full RTSP URL.
-            latency (int): The latency setting for rtspsrc (in milliseconds).
-            frame_handler_callback (callable): A callback function accepting (buffer, rtp_info).
+class VideoGStreamerClient:
+    """
+    A production-ready GStreamer client for video streaming via RTSP with unified diagnostics
+    and configurable sample processing.
+    """
+    def __init__(
+        self,
+        rtsp_url: str,
+        latency: int = 100,
+        frame_handler_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        processing_fn: Optional[Callable[[np.ndarray, dict], np.ndarray]] = None,
+        shared_config: Optional[dict] = None,
+    ) -> None:
+        """
+        Initialize the VideoGStreamerClient.
+
+        :param rtsp_url: The full RTSP URL.
+        :param latency: Latency setting for the source (in milliseconds).
+        :param frame_handler_callback: A callback function receiving a unified payload:
+            {
+                "data": <processed video frame (numpy array)>,
+                "diagnostics": {
+                    "sample_count": int,
+                    "error_count": int,
+                    "uptime": float,  # seconds since the pipeline started
+                },
+                "latest_rtp_data": <latest RTP extension data dict or None>
+            }
+        :param processing_fn: A function that processes each frame using a shared config.
+            It should have the signature: process_sample(frame: np.ndarray, config: dict) -> np.ndarray.
+            If not provided, a default function is used.
+        :param shared_config: A dictionary containing configuration parameters. This can be a
+            multiprocessing.Manager().dict() to allow runtime updates.
         """
         self.rtsp_url = rtsp_url
         self.latency = latency
         self.frame_handler_callback = frame_handler_callback
-        self.latest_rtp_data = None  # Latest RTP extension info.
+        self.processing_fn = processing_fn if processing_fn is not None else fix_colors_processing_fn
+        self.shared_config = shared_config if shared_config is not None else {}
+
+        # Diagnostics and state.
+        self.sample_count: int = 0
+        self.error_count: int = 0
+        self.start_time: Optional[float] = None
+        self.latest_rtp_data: Optional[Dict[str, Any]] = None
+
+        # Initialize GStreamer.
         Gst.init(None)
+        logger.info("GStreamer initialized")
         self.loop = GLib.MainLoop()
-        self.pipeline = None
+
+        # Build the pipeline manually.
+        self.pipeline = Gst.Pipeline.new("video_pipeline")
+        if not self.pipeline:
+            logger.error("Failed to create GStreamer pipeline")
+            raise RuntimeError("Pipeline creation failed")
         self._build_pipeline()
 
+    def _build_pipeline(self) -> None:
+        """
+        Create and link the GStreamer pipeline elements.
+        Pipeline structure:
+            rtspsrc -> (dynamic pad) -> rtph264depay -> h264parse ->
+            avdec_h264 -> videoconvert -> capsfilter -> appsink
+        """
+        # Create and configure source.
+        self.src = Gst.ElementFactory.make("rtspsrc", "src")
+        if not self.src:
+            logger.error("Failed to create 'rtspsrc' element")
+            raise RuntimeError("Element creation failed: rtspsrc")
+        self.src.set_property("location", self.rtsp_url)
+        self.src.set_property("latency", self.latency)
+        self.src.set_property("protocols", "tcp")
+        self.src.connect("pad-added", self._on_pad_added)
 
-    def _build_pipeline(self):
-        pipeline_str = (
-            f'rtspsrc location="{self.rtsp_url}" latency={self.latency} name=src ! '
-            'rtph264depay name=depay ! '
-            'h264parse ! avdec_h264 ! videoconvert ! '
-            'video/x-raw,format=RGB ! '
-            'appsink name=appsink emit-signals=true sync=false'
-        )
+        # Create remaining pipeline elements.
+        self.depay = Gst.ElementFactory.make("rtph264depay", "depay")
+        if not self.depay:
+            logger.error("Failed to create 'rtph264depay' element")
+            raise RuntimeError("Element creation failed: rtph264depay")
 
-        logger.info("Building pipeline: %s", pipeline_str)
-        try:
-            self.pipeline = Gst.parse_launch(pipeline_str)
-        except Exception as e:
-            logger.error("Failed to create pipeline: %s", e)
-            raise
+        self.h264parse = Gst.ElementFactory.make("h264parse", "h264parse")
+        if not self.h264parse:
+            logger.error("Failed to create 'h264parse' element")
+            raise RuntimeError("Element creation failed: h264parse")
 
-        self.rtspsrc = self.pipeline.get_by_name("src")
-        self.depay = self.pipeline.get_by_name("depay")
-        self.appsink = self.pipeline.get_by_name("appsink")
-        self.rtspsrc.connect("pad-added", self._on_pad_added, self.depay)
-        sink_pad = self.depay.get_static_pad("sink")
-        if sink_pad:
-            logger.info("Adding RTP probe to depayloader sink pad.")
-            sink_pad.add_probe(Gst.PadProbeType.BUFFER, self._rtp_probe)
+        self.decoder = Gst.ElementFactory.make("avdec_h264", "decoder")
+        if not self.decoder:
+            logger.error("Failed to create 'avdec_h264' element")
+            raise RuntimeError("Element creation failed: avdec_h264")
+
+        self.videoconvert = Gst.ElementFactory.make("videoconvert", "videoconvert")
+        if not self.videoconvert:
+            logger.error("Failed to create 'videoconvert' element")
+            raise RuntimeError("Element creation failed: videoconvert")
+
+        self.capsfilter = Gst.ElementFactory.make("capsfilter", "capsfilter")
+        if not self.capsfilter:
+            logger.error("Failed to create 'capsfilter' element")
+            raise RuntimeError("Element creation failed: capsfilter")
+        # Force output format to RGB; our processing function will fix colors.
+        caps = Gst.Caps.from_string("video/x-raw,format=RGB")
+        self.capsfilter.set_property("caps", caps)
+
+        self.appsink = Gst.ElementFactory.make("appsink", "appsink")
+        if not self.appsink:
+            logger.error("Failed to create 'appsink' element")
+            raise RuntimeError("Element creation failed: appsink")
+        self.appsink.set_property("emit-signals", True)
+        self.appsink.set_property("sync", False)
         self.appsink.connect("new-sample", self._on_new_sample)
+
+        # Add elements to the pipeline.
+        for element in [self.src, self.depay, self.h264parse, self.decoder,
+                        self.videoconvert, self.capsfilter, self.appsink]:
+            self.pipeline.add(element)
+
+        # Link static elements: depay -> h264parse -> decoder -> videoconvert -> capsfilter -> appsink.
+        if not self.depay.link(self.h264parse):
+            logger.error("Failed to link depay to h264parse")
+            raise RuntimeError("Linking failed: depay -> h264parse")
+        if not self.h264parse.link(self.decoder):
+            logger.error("Failed to link h264parse to decoder")
+            raise RuntimeError("Linking failed: h264parse -> decoder")
+        if not self.decoder.link(self.videoconvert):
+            logger.error("Failed to link decoder to videoconvert")
+            raise RuntimeError("Linking failed: decoder -> videoconvert")
+        if not self.videoconvert.link(self.capsfilter):
+            logger.error("Failed to link videoconvert to capsfilter")
+            raise RuntimeError("Linking failed: videoconvert -> capsfilter")
+        if not self.capsfilter.link(self.appsink):
+            logger.error("Failed to link capsfilter to appsink")
+            raise RuntimeError("Linking failed: capsfilter -> appsink")
+
+        # Add an RTP probe to extract extension data.
+        depay_sink_pad = self.depay.get_static_pad("sink")
+        if depay_sink_pad:
+            logger.info("Adding RTP probe to depay sink pad.")
+            depay_sink_pad.add_probe(Gst.PadProbeType.BUFFER, self._rtp_probe)
+        else:
+            logger.warning("Failed to get depay sink pad for probe.")
+
+        # Watch the bus.
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self._on_bus_message)
+        logger.info("Pipeline built and linked successfully")
 
-
-    @staticmethod
-    def _convert_ntp_to_unix(ntp_seconds, ntp_fraction):
-        return ntp_seconds - 2208988800 + ntp_fraction / (2**32)
-
-
-    @staticmethod
-    def _format_unix_timestamp(unix_timestamp):
-        return datetime.fromtimestamp(unix_timestamp, timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+    def _on_pad_added(self, src: Gst.Element, pad: Gst.Pad) -> None:
+        """
+        Handle the pad-added signal from rtspsrc.
+        """
+        caps = pad.get_current_caps()
+        if not caps:
+            logger.warning("No caps on pad '%s'", pad.get_name())
+            return
+        structure = caps.get_structure(0)
+        if not structure.get_name().startswith("application/x-rtp"):
+            logger.debug("Ignoring pad '%s' with type '%s'", pad.get_name(), structure.get_name())
+            return
+        logger.info("Linking pad '%s' to depayloader.", pad.get_name())
+        sink_pad = self.depay.get_static_pad("sink")
+        if sink_pad and not sink_pad.is_linked():
+            result = pad.link(sink_pad)
+            if result == Gst.PadLinkReturn.OK:
+                logger.info("Pad '%s' linked successfully.", pad.get_name())
+            else:
+                logger.error("Failed to link pad '%s': %s", pad.get_name(), result)
+        else:
+            logger.debug("Depay sink pad already linked or unavailable.")
 
     def _rtp_probe(self, pad, info):
+        """
+        Probe the RTP buffer to extract extension data.
+        """
         buffer = info.get_buffer()
         if not buffer:
             return Gst.PadProbeReturn.OK
@@ -77,6 +211,7 @@ class VideoGStreamerClient:
         success, rtp_buffer = GstRtp.RTPBuffer.map(buffer, Gst.MapFlags.READ)
         if not success:
             logger.error("Failed to map buffer as RTP packet.")
+            self.error_count += 1
             return Gst.PadProbeReturn.OK
 
         try:
@@ -94,13 +229,13 @@ class VideoGStreamerClient:
                 ext_bytes = ext_data.get_data() if hasattr(ext_data, "get_data") else ext_data
             except Exception as e:
                 logger.error("Error retrieving extension data: %s", e)
+                self.error_count += 1
                 return Gst.PadProbeReturn.OK
 
             if not ext_bytes or len(ext_bytes) < 12:
                 logger.warning("Extension payload too short; expected at least 12 bytes.")
                 return Gst.PadProbeReturn.OK
 
-            # Update RTP data even if some fields might be missing
             ntp_seconds = int.from_bytes(ext_bytes[0:4], byteorder='big')
             ntp_fraction = int.from_bytes(ext_bytes[4:8], byteorder='big')
             unix_timestamp = self._convert_ntp_to_unix(ntp_seconds, ntp_fraction)
@@ -119,42 +254,40 @@ class VideoGStreamerClient:
             }
         finally:
             GstRtp.RTPBuffer.unmap(rtp_buffer)
-        
         return Gst.PadProbeReturn.OK
 
+    @staticmethod
+    def _convert_ntp_to_unix(ntp_seconds: int, ntp_fraction: int) -> float:
+        """
+        Convert NTP timestamp to Unix timestamp.
+        """
+        return ntp_seconds - 2208988800 + ntp_fraction / (2**32)
 
-    def _on_pad_added(self, src, pad, depay):
-        logger.info("New pad added: %s", pad.get_name())
-        caps = pad.get_current_caps()
-        if not caps:
-            logger.warning("No caps available on pad %s", pad.get_name())
-            return
-        
-        structure = caps.get_structure(0)
-        if not structure.get_name().startswith("application/x-rtp"):
-            return
-        
-        logger.info("Linking RTP pad to depayloader.")
-        pad.add_probe(Gst.PadProbeType.BUFFER, self._rtp_probe)
-        sink_pad = depay.get_static_pad("sink")
-        if not sink_pad or sink_pad.is_linked():
-            return
-        
-        ret = pad.link(sink_pad)
-        if ret == Gst.PadLinkReturn.OK:
-            logger.info("Pad linked successfully.")
-        else:
-            logger.error("Failed to link pad %s. Error: %s", pad.get_name(), ret)
+    @staticmethod
+    def _format_unix_timestamp(unix_timestamp: float) -> str:
+        """
+        Format a Unix timestamp into a human-readable UTC string.
+        """
+        return datetime.fromtimestamp(unix_timestamp, timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f UTC")
 
-
-    def _on_new_sample(self, sink):
+    def _on_new_sample(self, sink: Gst.Element) -> Gst.FlowReturn:
+        """
+        Process a new sample from the appsink, decode the frame, apply user-supplied processing,
+        and trigger the callback with a unified payload.
+        """
         sample = sink.emit("pull-sample")
         if not sample:
+            logger.error("No sample received from appsink")
+            self.error_count += 1
             return Gst.FlowReturn.ERROR
+
+        self.sample_count += 1
 
         buffer = sample.get_buffer()
         success, map_info = buffer.map(Gst.MapFlags.READ)
         if not success:
+            logger.error("Failed to map buffer for reading")
+            self.error_count += 1
             return Gst.FlowReturn.ERROR
 
         caps = sample.get_caps()
@@ -162,93 +295,200 @@ class VideoGStreamerClient:
         width = structure.get_value("width")
         height = structure.get_value("height")
         pixel_format = structure.get_string("format")
-        logger.debug("Received frame with format: %s (%dx%d)", pixel_format, width, height)
+        logger.debug("Received frame format: %s (%dx%d)", pixel_format, width, height)
 
-        # Now decide how to process the data based on the pixel format.
-        if pixel_format == "RGB":  
-            # Typically, "RGB" means 3 bytes per pixel.
+        # Process the buffer based on pixel format.
+        if pixel_format == "RGB":
             expected_size = width * height * 3
             if len(map_info.data) < expected_size:
-                logger.error("Buffer size (%d) is smaller than expected RGB frame size (%d).", len(map_info.data), expected_size)
+                logger.error("Buffer size (%d) is smaller than expected RGB frame size (%d).",
+                             len(map_info.data), expected_size)
                 buffer.unmap(map_info)
+                self.error_count += 1
                 return Gst.FlowReturn.ERROR
-
             frame = np.frombuffer(map_info.data, dtype=np.uint8).reshape((height, width, 3))
-
         elif pixel_format in ("RGB16", "BGR16"):
-            # For example, 16-bit formats like RGB565 use 2 bytes per pixel.
             expected_size = width * height * 2
             if len(map_info.data) < expected_size:
-                logger.error("Buffer size (%d) is smaller than expected 16-bit frame size (%d).", len(map_info.data), expected_size)
+                logger.error("Buffer size (%d) is smaller than expected 16-bit frame size (%d).",
+                             len(map_info.data), expected_size)
                 buffer.unmap(map_info)
+                self.error_count += 1
                 return Gst.FlowReturn.ERROR
-
-            # Read as 16-bit data. Depending on your needs, you might want to convert this to 8-bit.
             frame = np.frombuffer(map_info.data, dtype=np.uint16).reshape((height, width))
-            # Conversion to 8-bit per channel might be done with bit shifting or using OpenCV's cvtColor if needed.
-        
         elif pixel_format == "NV12":
-            # For NV12, the expected size is width*height (Y plane) + width*height/2 (UV plane)
             expected_size = int(width * height * 1.5)
             if len(map_info.data) < expected_size:
-                logger.error("Buffer size (%d) is smaller than expected NV12 frame size (%d).", len(map_info.data), expected_size)
+                logger.error("Buffer size (%d) is smaller than expected NV12 frame size (%d).",
+                             len(map_info.data), expected_size)
                 buffer.unmap(map_info)
+                self.error_count += 1
                 return Gst.FlowReturn.ERROR
-
             nv12_frame = np.frombuffer(map_info.data, dtype=np.uint8).reshape((int(height * 1.5), width))
-            # Convert NV12 to RGB using OpenCV.
+            # Convert NV12 to RGB; the processing function will fix the colors.
             frame = cv2.cvtColor(nv12_frame, cv2.COLOR_YUV2RGB_NV12)
-
         else:
             logger.error("Unhandled pixel format: %s", pixel_format)
             buffer.unmap(map_info)
+            self.error_count += 1
             return Gst.FlowReturn.ERROR
 
         buffer.unmap(map_info)
 
+        # Apply the user-supplied processing function (which can use the shared config).
+        if self.processing_fn:
+            try:
+                frame = self.processing_fn(frame, self.shared_config)
+            except Exception as e:
+                logger.error("Error in processing function: %s", e)
+                self.error_count += 1
+
+        unified_payload = {
+            "data": frame,
+            "diagnostics": self.get_diagnostics(),
+            "latest_rtp_data": self.latest_rtp_data,
+        }
+
         try:
             if callable(self.frame_handler_callback):
-                self.frame_handler_callback(frame, self.latest_rtp_data)
+                self.frame_handler_callback(unified_payload)
             else:
                 logger.error("frame_handler_callback is not callable.")
         except Exception as e:
             logger.error("Error in frame handler callback: %s", e)
+            self.error_count += 1
 
         return Gst.FlowReturn.OK
 
-
-    def _on_bus_message(self, bus, message):
-        t = message.type
-        if t == Gst.MessageType.EOS:
+    def _on_bus_message(self, bus: Gst.Bus, message: Gst.Message) -> None:
+        """
+        Handle messages from the GStreamer bus.
+        """
+        msg_type = message.type
+        if msg_type == Gst.MessageType.EOS:
             logger.info("End-Of-Stream reached.")
-            self.loop.quit()
-        elif t == Gst.MessageType.ERROR:
+            self.stop()
+        elif msg_type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
-            logger.error("Error: %s, Debug: %s", err, debug)
-            self.loop.quit()
+            logger.error("GStreamer error: %s, Debug: %s", err.message, debug)
+            self.error_count += 1
+            self.stop()
 
-
-    def start(self):
+    def start(self) -> None:
         """
         Start the GStreamer pipeline and run the main loop.
         """
         logger.info("Starting VideoGStreamerClient pipeline.")
+        self.start_time = time.time()
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
             logger.error("Failed to set pipeline to PLAYING state.")
             raise RuntimeError("Pipeline failed to start.")
         try:
             self.loop.run()
-        except KeyboardInterrupt:
-            logger.info("KeyboardInterrupt received. Stopping pipeline.")
-        finally:
+        except Exception as e:
+            logger.error("Main loop encountered an error: %s", e)
             self.stop()
 
-    def stop(self):
+    def stop(self) -> None:
         """
-        Stop the pipeline and quit the main loop.
+        Stop the GStreamer pipeline and quit the main loop.
         """
         logger.info("Stopping VideoGStreamerClient pipeline.")
         self.pipeline.set_state(Gst.State.NULL)
-        self.loop.quit()
+        if self.loop.is_running():
+            self.loop.quit()
         logger.info("Pipeline stopped.")
+
+    def get_diagnostics(self) -> Dict[str, Any]:
+        """
+        Return the current diagnostics information.
+        """
+        return {
+            "sample_count": self.sample_count,
+            "error_count": self.error_count,
+            "uptime": time.time() - self.start_time if self.start_time else 0,
+        }
+
+
+def run_video_client_simple_example(rtsp_url: str, latency: int = 100,
+                                    queue: Optional[multiprocessing.Queue] = None,
+                                    processing_fn: Optional[Callable[[np.ndarray, dict], np.ndarray]] = None,
+                                    shared_config: Optional[dict] = None) -> None:
+    """
+    Instantiate and run a VideoGStreamerClient.
+    The processed video frame, diagnostics, and RTP extension data will be sent via the callback.
+    If a multiprocessing.Queue is provided, the unified payload is put into the queue.
+    """
+    def default_callback(payload: Dict[str, Any]) -> None:
+        if queue is not None:
+            queue.put(payload)
+        else:
+            diagnostics = payload.get("diagnostics", {})
+            logger.info("Received frame (shape: %s) | Diagnostics: %s | Latest RTP Data: %s",
+                        payload["data"].shape, diagnostics, payload.get("latest_rtp_data"))
+    client = VideoGStreamerClient(rtsp_url, latency=latency,
+                                  frame_handler_callback=default_callback,
+                                  processing_fn=processing_fn,
+                                  shared_config=shared_config)
+    client.start()
+
+
+def fix_colors_example_processing_fn(frame: np.ndarray, config: dict) -> np.ndarray:
+    """
+    Processing function that fixes color channels by converting from RGB to BGR.
+    
+    Since our pipeline outputs video/x-raw,format=RGB, but OpenCV expects BGR,
+    this function applies the conversion. The shared config can be used to add further
+    customizations if needed.
+    """
+    try:
+        # Convert the frame from RGB to BGR.
+        fixed_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    except Exception as e:
+        logger.error("Error converting colors: %s", e)
+        return frame
+    return fixed_frame
+
+
+if __name__ == "__main__":
+    multiprocessing.set_start_method("spawn", force=True)
+    frame_queue = multiprocessing.Queue()
+
+    # Create a shared configuration using a Manager dict.
+    manager = multiprocessing.Manager()
+    shared_config = manager.dict()
+    # For this example, we don't resize but just fix the colors.
+    # The processing function will convert RGB to BGR.
+    # Users can update this dict with their own keys if needed.
+    
+    # Replace with valid RTSP credentials and IP.
+    rtsp_url = "rtsp://root:fusion@172.20.127.235/axis-media/media.amp"
+
+    video_process = multiprocessing.Process(
+        target=run_video_client_simple_example,
+        args=(rtsp_url, 200, frame_queue, fix_colors_example_processing_fn, shared_config)
+    )
+    video_process.start()
+    logger.info("Launched VideoGStreamerClient subprocess with PID %d", video_process.pid)
+
+    try:
+        while True:
+            try:
+                payload = frame_queue.get(timeout=1)
+                frame = payload.get("data")
+                diagnostics = payload.get("diagnostics", {})
+                # Display the processed frame using OpenCV.
+                cv2.imshow("Video Frame", frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+            except Exception:
+                continue
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt detected in main process")
+    finally:
+        logger.info("Terminating the VideoGStreamerClient subprocess")
+        video_process.terminate()
+        video_process.join()
+        cv2.destroyAllWindows()
+        logger.info("Subprocess terminated")
