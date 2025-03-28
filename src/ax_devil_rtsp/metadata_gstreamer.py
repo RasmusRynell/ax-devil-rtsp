@@ -15,13 +15,7 @@ from typing import Callable, Optional, Dict, Any
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst, GLib
 
-# Configure logging.
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger("SceneMetadataClient")
-
 
 class SceneMetadataClient:
     """
@@ -284,17 +278,19 @@ def run_scene_metadata_client_simple_example(rtsp_url: str, latency: int = 200, 
     client.start()
 
 
+# Example
 if __name__ == "__main__":
-    """
-    Example usage
-    """
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s"
+    )
 
     multiprocessing.set_start_method("spawn", force=True)
     xml_queue = multiprocessing.Queue()
 
-    username = "username"
-    password = "password"
-    ip = "ip"
+    username = "root"
+    password = "fusion"
+    ip = "172.20.127.235"
 
     example_rtsp_url = f"rtsp://{username}:{password}@{ip}/axis-media/media.amp?analytics=polygon"
 
@@ -310,8 +306,7 @@ if __name__ == "__main__":
         while time.time() - start_time < 10:
             try:
                 payload = xml_queue.get(timeout=1)
-                logger.info("Main process received payload:\nData: %s\nDiagnostics: %s",
-                            payload["data"], payload["diagnostics"])
+                print(f"Main process received payload:\nData: {payload['data']}\nDiagnostics: {payload['diagnostics']}")
             except Exception:
                 continue
     except KeyboardInterrupt:
