@@ -24,7 +24,7 @@ class VideoGStreamerClient:
         rtsp_url: str,
         latency: int = 100,
         frame_handler_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        processing_fn: Optional[Callable[[np.ndarray, dict], np.ndarray]] = None,
+        processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
         shared_config: Optional[dict] = None,
     ) -> None:
         """
@@ -71,6 +71,12 @@ class VideoGStreamerClient:
             logger.error("Failed to create GStreamer pipeline")
             raise RuntimeError("Pipeline creation failed")
         self._build_pipeline()
+
+        # Initialize time spent metrics.
+        self.time_spent_rtp_probe = None
+        self.time_spent_sample = None
+        self.time_spent_custom_fn = None
+        self.time_spent_callback = None
 
     def _build_pipeline(self) -> None:
         """
@@ -189,6 +195,7 @@ class VideoGStreamerClient:
         """
         Probe the RTP buffer to extract extension data.
         """
+        start_time_rt = time.time()
         buffer = info.get_buffer()
         if not buffer:
             return Gst.PadProbeReturn.OK
@@ -239,6 +246,7 @@ class VideoGStreamerClient:
             }
         finally:
             GstRtp.RTPBuffer.unmap(rtp_buffer)
+        self.time_spent_rtp_probe = time.time() - start_time_rt
         return Gst.PadProbeReturn.OK
 
     @staticmethod
@@ -260,6 +268,7 @@ class VideoGStreamerClient:
         Process a new sample from the appsink, decode the frame, apply user-supplied processing,
         and trigger the callback with a unified payload.
         """
+        start_time_sample = time.time()
         sample = sink.emit("pull-sample")
         if not sample:
             logger.error("No sample received from appsink")
@@ -320,23 +329,28 @@ class VideoGStreamerClient:
 
         buffer.unmap(map_info)
 
+        self.time_spent_sample = time.time() - start_time_sample
+
         # Apply the user-supplied processing function (which can use the shared config).
         if self.processing_fn:
             try:
+                start_time_processing = time.time()
                 frame = self.processing_fn(frame, self.shared_config)
+                self.time_spent_custom_fn = time.time() - start_time_processing
             except Exception as e:
                 logger.error("Error in processing function: %s", e)
                 self.error_count += 1
 
         unified_payload = {
             "data": frame,
-            "diagnostics": self.get_diagnostics(),
-            "latest_rtp_data": self.latest_rtp_data,
+            "diagnostics": self.get_diagnostics()
         }
 
         try:
             if callable(self.frame_handler_callback):
+                start_time_callback = time.time()
                 self.frame_handler_callback(unified_payload)
+                self.time_spent_callback = time.time() - start_time_callback
             else:
                 logger.error("frame_handler_callback is not callable.")
         except Exception as e:
@@ -391,6 +405,11 @@ class VideoGStreamerClient:
         """
         return {
             "sample_count": self.sample_count,
+            "timestamp": time.time(),
+            "time_spent_rtp_probe": self.time_spent_rtp_probe,
+            "time_spent_sample": self.time_spent_sample,
+            "time_spent_custom_fn": self.time_spent_custom_fn,
+            "time_spent_last_callback": self.time_spent_callback,
             "error_count": self.error_count,
             "uptime": time.time() - self.start_time if self.start_time else 0,
         }
@@ -425,6 +444,7 @@ def example_processing_fn(frame: np.ndarray, config: dict) -> np.ndarray:
 
     Processing function that fixes color channels by converting from RGB to BGR.
     The shared config can be used to add further customizations if needed.
+    return has to be pickleable since it is sent via multiprocessing.Queue.
     """
     try:
         # Convert the frame from RGB to BGR.
