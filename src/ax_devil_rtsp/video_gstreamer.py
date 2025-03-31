@@ -343,7 +343,8 @@ class VideoGStreamerClient:
 
         unified_payload = {
             "data": frame,
-            "diagnostics": self.get_diagnostics()
+            "diagnostics": self.get_diagnostics(),
+            "latest_rtp_data": self.latest_rtp_data
         }
 
         try:
