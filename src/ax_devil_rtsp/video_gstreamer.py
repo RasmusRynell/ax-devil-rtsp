@@ -39,6 +39,7 @@ class VideoGStreamerClient:
                     "sample_count": int,
                     "error_count": int,
                     "uptime": float,  # seconds since the pipeline started
+                    ...
                 },
                 "latest_rtp_data": <latest RTP extension data dict or None>
             }
