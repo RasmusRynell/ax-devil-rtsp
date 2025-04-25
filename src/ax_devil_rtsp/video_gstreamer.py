@@ -8,22 +8,26 @@ import gi
 import numpy as np
 import cv2
 
+from .utils import parse_session_metadata
+
 gi.require_version('Gst', '1.0')
 gi.require_version('GstRtp', '1.0')
 from gi.repository import Gst, GstRtp, GLib
 
 logger = logging.getLogger("ax-devil-rtsp.VideoGStreamerClient")
 
+
 class VideoGStreamerClient:
     """
-    A production-ready GStreamer client for video streaming via RTSP with unified diagnostics
-    and configurable sample processing.
+    A production-ready GStreamer client for video streaming via RTSP with unified diagnostics,
+    session metadata callbacks, and configurable sample processing.
     """
     def __init__(
         self,
         rtsp_url: str,
         latency: int = 100,
         frame_handler_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        session_metadata_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
         shared_config: Optional[dict] = None,
     ) -> None:
@@ -35,23 +39,19 @@ class VideoGStreamerClient:
         :param frame_handler_callback: A callback function receiving a unified payload:
             {
                 "data": <processed video frame (numpy array)>,
-                "diagnostics": {
-                    "sample_count": int,
-                    "error_count": int,
-                    "uptime": float,  # seconds since the pipeline started
-                    ...
-                },
+                "diagnostics": { ... },
                 "latest_rtp_data": <latest RTP extension data dict or None>
             }
-        :param processing_fn: A function that processes each frame using a shared config.
-            It should have the signature: process_sample(frame: np.ndarray, config: dict) -> np.ndarray.
-            If not provided, a default function is used.
-        :param shared_config: A dictionary containing configuration parameters. This can be a
-            multiprocessing.Manager().dict() to allow runtime updates.
+        :param session_metadata_callback: A callback receiving session-level metadata dicts:
+            e.g. {"stream_name": ..., "caps": ..., "structure": ...}
+                  or {"sdes": { ... }}
+        :param processing_fn: A function that processes each frame using shared_config.
+        :param shared_config: A dict for runtime-updatable configuration.
         """
         self.rtsp_url = rtsp_url
         self.latency = latency
         self.frame_handler_callback = frame_handler_callback
+        self.session_metadata_callback = session_metadata_callback
         self.processing_fn = processing_fn
         self.shared_config = shared_config if shared_config is not None else {}
 
@@ -95,6 +95,7 @@ class VideoGStreamerClient:
         self.src.set_property("latency", self.latency)
         self.src.set_property("protocols", "tcp")
         self.src.connect("pad-added", self._on_pad_added)
+        self.src.connect("notify::sdes", self._on_sdes_notify)
 
         # Create remaining pipeline elements.
         self.depay = Gst.ElementFactory.make("rtph264depay", "depay")
@@ -121,7 +122,6 @@ class VideoGStreamerClient:
         if not self.capsfilter:
             logger.error("Failed to create 'capsfilter' element")
             raise RuntimeError("Element creation failed: capsfilter")
-        # Force output format to RGB; our processing function will fix colors.
         caps = Gst.Caps.from_string("video/x-raw,format=RGB")
         self.capsfilter.set_property("caps", caps)
 
@@ -134,11 +134,13 @@ class VideoGStreamerClient:
         self.appsink.connect("new-sample", self._on_new_sample)
 
         # Add elements to the pipeline.
-        for element in [self.src, self.depay, self.h264parse, self.decoder,
-                        self.videoconvert, self.capsfilter, self.appsink]:
+        for element in [
+            self.src, self.depay, self.h264parse, self.decoder,
+            self.videoconvert, self.capsfilter, self.appsink
+        ]:
             self.pipeline.add(element)
 
-        # Link static elements: depay -> h264parse -> decoder -> videoconvert -> capsfilter -> appsink.
+        # Link static elements.
         if not self.depay.link(self.h264parse):
             logger.error("Failed to link depay to h264parse")
             raise RuntimeError("Linking failed: depay -> h264parse")
@@ -171,7 +173,7 @@ class VideoGStreamerClient:
 
     def _on_pad_added(self, src: Gst.Element, pad: Gst.Pad) -> None:
         """
-        Handle the pad-added signal from rtspsrc.
+        Handle the pad-added signal from rtspsrc, link dynamic pads, and emit session metadata.
         """
         caps = pad.get_current_caps()
         if not caps:
@@ -179,8 +181,10 @@ class VideoGStreamerClient:
             return
         structure = caps.get_structure(0)
         if not structure.get_name().startswith("application/x-rtp"):
-            logger.debug("Ignoring pad '%s' with type '%s'", pad.get_name(), structure.get_name())
+            logger.debug("Ignoring pad '%s' with type '%s'",
+                         pad.get_name(), structure.get_name())
             return
+
         logger.info("Linking pad '%s' to depayloader.", pad.get_name())
         sink_pad = self.depay.get_static_pad("sink")
         if sink_pad and not sink_pad.is_linked():
@@ -188,9 +192,34 @@ class VideoGStreamerClient:
             if result == Gst.PadLinkReturn.OK:
                 logger.info("Pad '%s' linked successfully.", pad.get_name())
             else:
-                logger.error("Failed to link pad '%s': %s", pad.get_name(), result)
+                logger.error("Failed to link pad '%s': %s",
+                             pad.get_name(), result)
         else:
             logger.debug("Depay sink pad already linked or unavailable.")
+
+        # === Session metadata hook ===
+        metadata = {
+            "stream_name": pad.get_name(),
+            "caps": caps.to_string(),
+            "structure": structure.to_string(),
+        }
+        if self.session_metadata_callback:
+            self.session_metadata_callback(parse_session_metadata(metadata))
+        logger.info("Session metadata: %s", metadata)
+
+    def _on_sdes_notify(self, src: Gst.Element, pspec) -> None:
+        """
+        Handle updates to the RTCP SDES items on the rtspsrc element.
+        """
+        sdes_struct = src.get_property("sdes")
+        sdes_data: Dict[str, Any] = {}
+        if isinstance(sdes_struct, Gst.Structure):
+            for key in sdes_struct.keys():
+                sdes_data[key] = sdes_struct.get_value(key)
+
+        if self.session_metadata_callback:
+            self.session_metadata_callback({"sdes": sdes_data})
+        logger.info("Session SDES items: %s", sdes_data)
 
     def _rtp_probe(self, pad, info):
         """
@@ -262,12 +291,14 @@ class VideoGStreamerClient:
         """
         Format a Unix timestamp into a human-readable UTC string.
         """
-        return datetime.fromtimestamp(unix_timestamp, timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+        return datetime.fromtimestamp(unix_timestamp, timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S.%f UTC"
+        )
 
     def _on_new_sample(self, sink: Gst.Element) -> Gst.FlowReturn:
         """
-        Process a new sample from the appsink, decode the frame, apply user-supplied processing,
-        and trigger the callback with a unified payload.
+        Process a new sample from the appsink, decode the frame, apply user-supplied
+        processing, and trigger the callback with a unified payload.
         """
         start_time_sample = time.time()
         sample = sink.emit("pull-sample")
@@ -296,8 +327,10 @@ class VideoGStreamerClient:
         if pixel_format == "RGB":
             expected_size = width * height * 3
             if len(map_info.data) < expected_size:
-                logger.error("Buffer size (%d) is smaller than expected RGB frame size (%d).",
-                             len(map_info.data), expected_size)
+                logger.error(
+                    "Buffer size (%d) is smaller than expected RGB frame size (%d).",
+                    len(map_info.data), expected_size
+                )
                 buffer.unmap(map_info)
                 self.error_count += 1
                 return Gst.FlowReturn.ERROR
@@ -305,8 +338,10 @@ class VideoGStreamerClient:
         elif pixel_format in ("RGB16", "BGR16"):
             expected_size = width * height * 2
             if len(map_info.data) < expected_size:
-                logger.error("Buffer size (%d) is smaller than expected 16-bit frame size (%d).",
-                             len(map_info.data), expected_size)
+                logger.error(
+                    "Buffer size (%d) is smaller than expected 16-bit frame size (%d).",
+                    len(map_info.data), expected_size
+                )
                 buffer.unmap(map_info)
                 self.error_count += 1
                 return Gst.FlowReturn.ERROR
@@ -314,13 +349,14 @@ class VideoGStreamerClient:
         elif pixel_format == "NV12":
             expected_size = int(width * height * 1.5)
             if len(map_info.data) < expected_size:
-                logger.error("Buffer size (%d) is smaller than expected NV12 frame size (%d).",
-                             len(map_info.data), expected_size)
+                logger.error(
+                    "Buffer size (%d) is smaller than expected NV12 frame size (%d).",
+                    len(map_info.data), expected_size
+                )
                 buffer.unmap(map_info)
                 self.error_count += 1
                 return Gst.FlowReturn.ERROR
             nv12_frame = np.frombuffer(map_info.data, dtype=np.uint8).reshape((int(height * 1.5), width))
-            # Convert NV12 to RGB; the processing function will fix the colors.
             frame = cv2.cvtColor(nv12_frame, cv2.COLOR_YUV2RGB_NV12)
         else:
             logger.error("Unhandled pixel format: %s", pixel_format)
@@ -329,10 +365,9 @@ class VideoGStreamerClient:
             return Gst.FlowReturn.ERROR
 
         buffer.unmap(map_info)
-
         self.time_spent_sample = time.time() - start_time_sample
 
-        # Apply the user-supplied processing function (which can use the shared config).
+        # Apply the user-supplied processing function.
         if self.processing_fn:
             try:
                 start_time_processing = time.time()
@@ -417,10 +452,13 @@ class VideoGStreamerClient:
         }
 
 
-def run_video_client_simple_example(rtsp_url: str, latency: int = 100,
-                                    queue: Optional[multiprocessing.Queue] = None,
-                                    processing_fn: Optional[Callable[[np.ndarray, dict], np.ndarray]] = None,
-                                    shared_config: Optional[dict] = None) -> None:
+def run_video_client_simple_example(
+    rtsp_url: str,
+    latency: int = 100,
+    queue: Optional[multiprocessing.Queue] = None,
+    processing_fn: Optional[Callable[[np.ndarray, dict], np.ndarray]] = None,
+    shared_config: Optional[dict] = None,
+) -> None:
     """
     Instantiate and run a VideoGStreamerClient.
     The processed video frame, diagnostics, and RTP extension data will be sent via the callback.
@@ -431,25 +469,33 @@ def run_video_client_simple_example(rtsp_url: str, latency: int = 100,
             queue.put(payload)
         else:
             diagnostics = payload.get("diagnostics", {})
-            logger.info("Received frame (shape: %s) | Diagnostics: %s | Latest RTP Data: %s",
-                        payload["data"].shape, diagnostics, payload.get("latest_rtp_data"))
-    client = VideoGStreamerClient(rtsp_url, latency=latency,
-                                  frame_handler_callback=default_callback,
-                                  processing_fn=processing_fn,
-                                  shared_config=shared_config)
+            logger.info(
+                "Received frame (shape: %s) | Diagnostics: %s | Latest RTP Data: %s",
+                payload["data"].shape,
+                diagnostics,
+                payload.get("latest_rtp_data")
+            )
+
+    def metadata_callback(payload: Dict[str, Any]) -> None:
+        print(payload)
+
+    client = VideoGStreamerClient(
+        rtsp_url,
+        latency=latency,
+        frame_handler_callback=default_callback,
+        session_metadata_callback=metadata_callback,
+        processing_fn=processing_fn,
+        shared_config=shared_config
+    )
     client.start()
 
 
 def example_processing_fn(frame: np.ndarray, config: dict) -> np.ndarray:
     """
     Important: This function runs in the same process as the gstreamer pipeline.
-
-    Processing function that fixes color channels by converting from RGB to BGR.
-    The shared config can be used to add further customizations if needed.
-    return has to be pickleable since it is sent via multiprocessing.Queue.
+    It fixes color channels by converting from RGB to BGR.
     """
     try:
-        # Convert the frame from RGB to BGR.
         fixed_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     except Exception as e:
         logger.error("Error converting colors: %s", e)

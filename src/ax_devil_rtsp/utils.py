@@ -1,6 +1,8 @@
 import sys
 import xml.etree.ElementTree as ET
 import logging
+import re
+from typing import Dict, Any
 
 logger = logging.getLogger("ax-devil-rtsp.utils")
 
@@ -81,4 +83,69 @@ def parse_metadata_xml(xml_data: bytes) -> dict:
         
     except ET.ParseError as e:
         logger.error("XML Parse Error: %s", e)
-        return None 
+        return None
+
+
+def _parse_caps_string(caps_str: str) -> Dict[str, Any]:
+    """
+    Parse a GStreamer caps/structure string of the form:
+      "video/x-raw,format=(string)RGB,width=(int)640,framerate=(fraction)30/1"
+    into a dict: {"format": "RGB", "width": 640, "framerate": "30/1", ...}.
+    Respects GStreamer’s escape for commas (\\,).
+    """
+    # Split on commas not preceded by a backslash
+    parts = re.split(r'(?<!\\),\s*', caps_str)  # negative lookbehind :contentReference[oaicite:1]{index=1}
+    result: Dict[str, Any] = {}
+    for part in parts:
+        # Match key=(type)value
+        m = re.match(r'([^=]+)=\(([^)]+)\)(.*)', part)
+        if not m:
+            continue
+        key, type_, raw_val = m.groups()
+        # Unescape any '\,' back to ','
+        val = raw_val.strip().strip('"').replace(r'\,', ',')
+        # Convert to native type
+        if type_ in ("int", "uint", "guint", "gint"):
+            result[key] = int(val)
+        elif type_ in ("double", "float"):
+            result[key] = float(val)
+        elif type_ == "boolean":
+            result[key] = val.lower() == "true"
+        else:
+            # string, fraction, guint64, etc. kept as string
+            result[key] = val
+    return result
+
+
+def parse_session_metadata(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Given raw metadata as delivered by VideoGStreamerClient:
+      {
+        "stream_name": "...",
+        "caps": "...",
+        "structure": "...",
+        "sdes": { ... }           # optional
+      }
+    returns a dict with:
+      - stream_name (str)
+      - caps (raw string)
+      - caps_parsed (Dict[str,Any])
+      - structure (raw string)
+      - structure_parsed (Dict[str,Any])
+      - sdes (if present, copied through)
+    """
+    parsed: Dict[str, Any] = {}
+    # Copy over the simple field
+    parsed["stream_name"] = raw.get("stream_name")
+
+    # Parse both caps and structure
+    for field in ("caps", "structure"):
+        text = raw.get(field)
+        if isinstance(text, str):
+            parsed[field] = text
+            parsed[f"{field}_parsed"] = _parse_caps_string(text)
+
+    # Pass through SDES if present
+    if "sdes" in raw:
+        parsed["sdes"] = raw["sdes"]
+    return parsed
