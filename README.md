@@ -130,9 +130,6 @@ metadata_client.start()  # Starts streaming in current thread
 ```bash
 # Display video stream in window
 ax-devil-rtsp video --ip 192.168.1.90 --username admin --password secret
-
-# Fullscreen mode
-ax-devil-rtsp video --ip 192.168.1.90 --fullscreen
 ```
 </p>
 </details>
@@ -142,28 +139,11 @@ ax-devil-rtsp video --ip 192.168.1.90 --fullscreen
 <p>
 
 ```bash
-# Stream metadata using GStreamer implementation
-ax-devil-rtsp metadata-gst --ip 192.168.1.90 --username admin --password secret
-
-# Stream metadata with debug logging
-ax-devil-rtsp metadata-gst --ip 192.168.1.90 --debug
+ax-devil-rtsp metadata --ip 192.168.1.90 --username admin --password secret
 ```
 </p>
 </details>
 
-<details>
-<summary><a name="metadata-raw-cli"></a><b>🔄 Scene Metadata (Raw)</b></summary>
-<p>
-
-```bash
-# Stream metadata using raw socket implementation
-ax-devil-rtsp metadata-raw --ip 192.168.1.90 --username admin --password secret
-
-# Stream metadata with custom buffer latency
-ax-devil-rtsp metadata-raw --ip 192.168.1.90 --latency 200
-```
-</p>
-</details>
 
 > **Note:** For more CLI examples and detailed API documentation, check the [examples directory](src/ax_devil_rtsp/examples) in the source code.
 
