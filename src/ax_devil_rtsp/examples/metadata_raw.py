@@ -1,11 +1,9 @@
-from collections.abc import Callable
 import socket
 import re
 import hashlib
 import struct
 import os
 import logging
-from typing import Optional
 
 logger = logging.getLogger("ax-devil-rtsp.SceneMetadataRawClient")
 

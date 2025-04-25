@@ -1,136 +1,129 @@
+from __future__ import annotations
 import argparse
 import logging
-import os
-import sys
-import time
-import multiprocessing
+import multiprocessing as mp
 import cv2
 
-from ax_devil_rtsp.metadata_gstreamer import run_scene_metadata_client_simple_example
-from ax_devil_rtsp.video_gstreamer import run_video_client_simple_example, example_processing_fn
+from ..gstreamer_data_grabber import CombinedRTSPClient
 
-logger = logging.getLogger("axis-cli")
 
-def run_metadata(args):
-    """Run the metadata client and print unified payloads."""
-    multiprocessing.set_start_method("spawn", force=True)
-    queue = multiprocessing.Queue()
-
-    # Build the RTSP URL: use --rtsp-url if provided; otherwise, construct one using credentials and the default metadata URI.
-    rtsp_url = args.rtsp_url if args.rtsp_url else (
-        f"rtsp://{args.username}:{args.password}@{args.ip}/axis-media/media.amp?analytics=polygon"
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="CLI for CombinedRTSPClient (video, metadata, RTP extension, session metadata)"
     )
+    parser.add_argument("--ip", help="Camera IP address (required unless --rtsp-url provided)")
+    parser.add_argument("--username", default="", help="Device username")
+    parser.add_argument("--password", default="", help="Device password")
+    parser.add_argument("--latency", type=int, default=100, help="RTSP latency in ms")
+    parser.add_argument("--no-video", action="store_true", help="Disable video frames", default=False)
+    parser.add_argument("--no-metadata", action="store_true", help="Disable metadata XML", default=False)
+    parser.add_argument("--rtp-ext", action="store_true", help="Enable RTP extension", default=True)
+    parser.add_argument("--rtsp-url", help="Full RTSP URL, overrides all other arguments")
+    parser.add_argument("--log-level", default="INFO", help="Logging level")
+    return parser.parse_args()
 
-    logger.info("Starting SceneMetadataClient with URL: %s", rtsp_url)
-    process = multiprocessing.Process(
-        target=run_scene_metadata_client_simple_example,
-        args=(rtsp_url, args.latency, queue)
+
+def build_rtsp_url(args):
+    if args.rtsp_url:
+        return args.rtsp_url
+    if not args.ip:
+        raise ValueError("No IP address provided")
+    cred = f"{args.username}:{args.password}@" if args.username or args.password else ""
+    url = f"rtsp://{cred}{args.ip}/axis-media/media.amp"
+    additions = ""
+    if args.rtp_ext:
+        additions += "onvifreplayext=1"
+    if args.no_video:
+        additions += "&video=0"
+    else:
+        additions += "&resolution=320x240&camera=1"
+    if not args.no_metadata:
+        additions += "&analytics=polygon"
+    if additions:
+        url += "?" + additions
+    print(url)
+    return url
+
+
+def client_runner(
+    rtsp_url: str,
+    latency: int,
+    queue: mp.Queue,
+) -> None:
+    def video_cb(pl: dict):
+        queue.put({"kind": "video", **pl})
+
+    def metadata_cb(pl: dict):
+        queue.put({"kind": "metadata", **pl})
+
+    def session_cb(md: dict):
+        queue.put({"kind": "session", "data": md})
+
+    client = CombinedRTSPClient(
+        rtsp_url,
+        latency=latency,
+        video_frame_callback=video_cb,
+        metadata_callback=metadata_cb,
+        session_metadata_callback=session_cb,
     )
+    client.start()
 
-    process.start()
-    logger.info("Launched SceneMetadataClient subprocess with PID %d", process.pid)
-    start_time = time.time()
+
+def main():
+    args = parse_args()
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper(), logging.INFO),
+        format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s",
+    )
     try:
-        while time.time() - start_time < args.duration:
-            try:
-                payload = queue.get(timeout=1)
-                print("Received payload:")
-                print("Data:", payload.get("data"))
-                print("Diagnostics:", payload.get("diagnostics"))
-            except Exception:
-                continue
-    except KeyboardInterrupt:
-        logger.info("KeyboardInterrupt detected in main process")
-    finally:
-        logger.info("Terminating SceneMetadataClient subprocess")
-        process.terminate()
-        process.join()
+        rtsp_url = build_rtsp_url(args)
+    except ValueError as e:
+        logging.error(e)
+        return
 
+    # Multiprocessing setup
+    if mp.get_start_method(allow_none=True) != "spawn":
+        mp.set_start_method("spawn", force=True)
+    queue: mp.Queue = mp.Queue()
 
-def run_video(args):
-    """Run the video client and display video frames using OpenCV."""
-    multiprocessing.set_start_method("spawn", force=True)
-    queue = multiprocessing.Queue()
-    manager = multiprocessing.Manager()
-    shared_config = manager.dict()  # Allows runtime updates to processing configuration.
-
-    # Build the RTSP URL: use --rtsp-url if provided; otherwise, construct one using credentials and the default video URI.
-    rtsp_url = args.rtsp_url if args.rtsp_url else (
-        f"rtsp://{args.username}:{args.password}@{args.ip}/axis-media/media.amp"
+    proc = mp.Process(
+        target=client_runner,
+        args=(
+            rtsp_url,
+            args.latency,
+            queue,
+        ),
+        daemon=True,
     )
+    proc.start()
+    logging.info("Spawned CombinedRTSPClient with PID %d", proc.pid)
 
-    logger.info("Starting VideoGStreamerClient with URL: %s", rtsp_url)
-    process = multiprocessing.Process(
-        target=run_video_client_simple_example,
-        args=(rtsp_url, args.latency, queue, example_processing_fn, shared_config)
-    )
-
-    process.start()
-    logger.info("Launched VideoGStreamerClient subprocess with PID %d", process.pid)
     try:
         while True:
-            try:
-                payload = queue.get(timeout=1)
-                frame = payload.get("data")
-                diagnostics = payload.get("diagnostics", {})
-                rtp_data = payload.get("latest_rtp_data", {})
-                print(f"Received frame (shape: {frame.shape}) | Diagnostics: {diagnostics} | RTP Data: {rtp_data}")
-                cv2.imshow("Video Frame", frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+            item = queue.get(timeout=1)
+            kind = item.get("kind")
+            if kind == "video":
+                frame = item["data"]
+                diag = item["diagnostics"]
+                print(f"[VIDEO] frame shape={frame.shape}, diag={diag}")
+                cv2.imshow("Video", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
-            except Exception:
-                continue
+            elif kind == "metadata":
+                xml = item["data"]
+                diag = item["diagnostics"]
+                print(f"[METADATA] {len(xml)} bytes, diag={diag}")
+                print(xml)
+            elif kind == "session":
+                print(f"[SESSION METADATA] {item['data']}")
     except KeyboardInterrupt:
-        logger.info("KeyboardInterrupt detected in main process")
+        logging.info("Interrupted by user")
     finally:
-        logger.info("Terminating VideoGStreamerClient subprocess")
-        process.terminate()
-        process.join()
+        logging.info("Terminating client")
+        proc.terminate()
+        proc.join()
         cv2.destroyAllWindows()
 
 
-def cli():    
-    parser = argparse.ArgumentParser(
-        description="Axis Production GStreamer Client CLI",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    # Global options.
-    parser.add_argument("--username", default=os.getenv("AX_DEVIL_TARGET_USER", "root"),
-                        help="RTSP username")
-    parser.add_argument("--password", default=os.getenv("AX_DEVIL_TARGET_PASS", "fusion"),
-                        help="RTSP password")
-    parser.add_argument("--ip", default=os.getenv("AX_DEVIL_TARGET_ADDR", "192.168.1.81"),
-                        help="Camera IP address")
-    parser.add_argument("--latency", type=int, default=100, help="RTSP latency in ms")
-    parser.add_argument("--rtsp-url",
-                        help="Full RTSP URL; overrides username, password, ip, and uri if provided")
-    parser.add_argument("--log-level", type=str, default="ERROR", help="Log level")
-
-    subparsers = parser.add_subparsers(dest="command", help="Subcommand to run")
-
-    # Subcommand for the metadata client.
-    metadata_parser = subparsers.add_parser("metadata", help="Run the metadata client")
-    metadata_parser.add_argument("--duration", type=int, default=10,
-                                 help="Duration (in seconds) to run the metadata client")
-
-    # Subcommand for the video client.
-    video_parser = subparsers.add_parser("video", help="Run the video client")
-
-    args = parser.parse_args()
-
-    logging.basicConfig(
-        level=args.log_level,
-        format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s"
-    )
-
-    if args.command == "metadata":
-        run_metadata(args)
-    elif args.command == "video":
-        run_video(args)
-    else:
-        parser.print_help()
-        sys.exit(1)
-
-
 if __name__ == "__main__":
-    cli()
+    main()

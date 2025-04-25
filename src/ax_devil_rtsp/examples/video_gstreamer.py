@@ -8,7 +8,7 @@ import gi
 import numpy as np
 import cv2
 
-from .utils import parse_session_metadata
+from ..utils import parse_session_metadata
 
 gi.require_version('Gst', '1.0')
 gi.require_version('GstRtp', '1.0')
