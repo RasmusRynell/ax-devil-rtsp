@@ -1,17 +1,3 @@
-'''
-combined.py
-============
-
-Unified GStreamer RTSP client delivering:
-
-* decoded video frames (H-264 → RGB numpy array)
-* ONVIF / AXIS scene-metadata (XML over RTP)
-* RTP replay-extension timestamps + flags
-
-Author: <your-name>
-Updated: 2025-04-25
-'''
-
 from __future__ import annotations
 
 import logging
