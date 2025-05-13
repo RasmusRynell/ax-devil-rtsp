@@ -3,6 +3,7 @@ import argparse
 import logging
 import multiprocessing as mp
 import cv2
+import urllib.parse
 
 from ..gstreamer_data_grabber import CombinedRTSPClient
 
@@ -14,10 +15,11 @@ def parse_args():
     parser.add_argument("--ip", help="Camera IP address (required unless --rtsp-url provided)")
     parser.add_argument("--username", default="", help="Device username")
     parser.add_argument("--password", default="", help="Device password")
+    parser.add_argument("--source", default="1", help="What device \"source\"/\"camera head\" to use")
     parser.add_argument("--latency", type=int, default=100, help="RTSP latency in ms")
     parser.add_argument("--no-video", action="store_true", help="Disable video frames", default=False)
     parser.add_argument("--no-metadata", action="store_true", help="Disable metadata XML", default=False)
-    parser.add_argument("--rtp-ext", action="store_true", help="Enable RTP extension", default=True)
+    parser.add_argument("--rtp-ext", action="store_true", help="Enable RTP extension", default=False)
     parser.add_argument("--rtsp-url", help="Full RTSP URL, overrides all other arguments")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     return parser.parse_args()
@@ -26,22 +28,36 @@ def parse_args():
 def build_rtsp_url(args):
     if args.rtsp_url:
         return args.rtsp_url
+
     if not args.ip:
         raise ValueError("No IP address provided")
+    
+    if args.no_video and args.no_metadata:
+        raise ValueError("You cannot ask for nothing and expect to receive something.")
+
     cred = f"{args.username}:{args.password}@" if args.username or args.password else ""
     url = f"rtsp://{cred}{args.ip}/axis-media/media.amp"
-    additions = ""
-    if args.rtp_ext:
-        additions += "onvifreplayext=1"
+
+    # Build query parameters in a dictionary.
+    params = {}
     if args.no_video:
-        additions += "&video=0"
-    else:
-        additions += "&resolution=320x240&camera=1"
+        params["video"] = "0"
+    params["audio"] = "0"
+    
+    if args.rtp_ext:
+        params["onvifreplayext"] = "1"
+
+    if args.no_video:
+        params["resolution"] = "500x500"
+
     if not args.no_metadata:
-        additions += "&analytics=polygon"
-    if additions:
-        url += "?" + additions
-    print(url)
+        params["analytics"] = "polygon"
+    params["camera"] = args.source
+
+    # If there are any query parameters, append them to the URL.
+    if params:
+        query_string = urllib.parse.urlencode(params)
+        url += "?" + query_string
     return url
 
 
