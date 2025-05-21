@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument("--latency", type=int, default=100, help="RTSP latency in ms")
     parser.add_argument("--no-video", action="store_true", help="Disable video frames", default=False)
     parser.add_argument("--no-metadata", action="store_true", help="Disable metadata XML", default=False)
-    parser.add_argument("--rtp-ext", action="store_true", help="Enable RTP extension", default=False)
+    parser.add_argument("--rtp-ext", action="store_true", help="Enable RTP extension", default=True)
     parser.add_argument("--rtsp-url", help="Full RTSP URL, overrides all other arguments")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     return parser.parse_args()
@@ -42,12 +42,12 @@ def build_rtsp_url(args):
     params = {}
     if args.no_video:
         params["video"] = "0"
-    params["audio"] = "0"
+        params["audio"] = "0"
     
     if args.rtp_ext:
         params["onvifreplayext"] = "1"
 
-    if args.no_video:
+    if not args.no_video:
         params["resolution"] = "500x500"
 
     if not args.no_metadata:
@@ -58,6 +58,7 @@ def build_rtsp_url(args):
     if params:
         query_string = urllib.parse.urlencode(params)
         url += "?" + query_string
+    print(f"Starting stream on {url=}")
     return url
 
 
@@ -116,7 +117,7 @@ def main():
 
     try:
         while True:
-            item = queue.get(timeout=1)
+            item = queue.get(timeout=100)
             kind = item.get("kind")
             if kind == "video":
                 frame = item["data"]

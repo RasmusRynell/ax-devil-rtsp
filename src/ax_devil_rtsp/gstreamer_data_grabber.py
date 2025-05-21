@@ -14,7 +14,7 @@ from .utils import parse_session_metadata
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GstRtp", "1.0")
-from gi.repository import Gst, GstRtp, GLib
+from gi.repository import Gst, GstRtp, GLib, GstRtsp
 
 logger = logging.getLogger("ax-devil-rtsp.CombinedRTSPClient")
 
@@ -93,7 +93,15 @@ class CombinedRTSPClient:
             raise RuntimeError("Unable to create rtspsrc element")
         src.props.location = self.rtsp_url
         src.props.latency = self.latency
-        src.props.protocols = "tcp"
+        src.props.protocols = (GstRtsp.RTSPLowerTrans.TCP |
+                               GstRtsp.RTSPLowerTrans.UDP)
+        
+        # Be stricter about timeout handling
+        src.props.tcp_timeout = 100_000_000     # µs until we declare the server dead
+
+        # Axis metadata streams sometimes arrive late; delay EOS
+        src.props.drop_on_latency = False
+
         src.connect("pad-added", self._on_pad_added)
         src.connect("notify::sdes", self._on_sdes_notify)
         self.pipeline.add(src)
@@ -173,7 +181,6 @@ class CombinedRTSPClient:
             err, dbg = msg.parse_error()
             logger.error("Gst Error: %s | %s", err.message, dbg)
             self.err_cnt += 1
-            self.stop()
 
     def _on_pad_added(self, _src: Gst.Element, pad: Gst.Pad) -> None:
         caps = pad.get_current_caps()
@@ -186,7 +193,7 @@ class CombinedRTSPClient:
         media = struct.get_string("media") or ""
         if media.lower() == "application":
             self._ensure_meta_branch()
-            sink_pad = getattr(self, 'm_jit', None).get_static_pad('sink')
+            sink_pad = self.m_jit.get_static_pad('sink')
         else:
             sink_pad = self.v_depay.get_static_pad('sink')
 
@@ -479,7 +486,7 @@ if __name__ == "__main__":
     try:
         while True:
             try:
-                item = q.get(timeout=1)
+                item = q.get(timeout=100)
                 if item["kind"] == "video":
                     print(item["latest_rtp_data"])
                     cv2.imshow("Video", item["data"])
