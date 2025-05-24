@@ -76,12 +76,16 @@ def client_runner(
     def session_cb(md: dict):
         queue.put({"kind": "session", "data": md})
 
+    def error_cb(error: dict):
+        queue.put({"kind": "error", **error})
+
     client = CombinedRTSPClient(
         rtsp_url,
         latency=latency,
         video_frame_callback=video_cb,
         metadata_callback=metadata_cb,
         session_metadata_callback=session_cb,
+        error_callback=error_cb,
     )
     client.start()
 
@@ -133,6 +137,11 @@ def main():
                 print(xml)
             elif kind == "session":
                 print(f"[SESSION METADATA] {item['data']}")
+            elif kind == "error":
+                error_type = item.get("error_type", "Unknown")
+                message = item.get("message", "Unknown error")
+                error_count = item.get("error_count", 0)
+                print(f"[ERROR] {error_type}: {message} (total errors: {error_count})")
     except KeyboardInterrupt:
         logging.info("Interrupted by user")
     finally:

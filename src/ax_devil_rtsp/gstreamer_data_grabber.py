@@ -48,6 +48,7 @@ class CombinedRTSPClient:
         video_frame_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         metadata_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         session_metadata_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        error_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         video_processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
         shared_config: Optional[dict] = None,
     ) -> None:
@@ -56,6 +57,7 @@ class CombinedRTSPClient:
         self.video_frame_cb = video_frame_callback
         self.metadata_cb = metadata_callback
         self.session_md_cb = session_metadata_callback
+        self.error_cb = error_callback
         self.video_proc_fn = video_processing_fn
         self.shared_cfg = shared_config or {}
 
@@ -147,7 +149,7 @@ class CombinedRTSPClient:
         m_caps = Gst.ElementFactory.make("capsfilter", "m_caps")
         m_sink = Gst.ElementFactory.make("appsink", "m_sink")
         if not all((m_jit, m_caps, m_sink)):
-            logger.error("Metadata branch creation failed")
+            self._report_error("Metadata Branch", "Failed to create metadata pipeline elements")
             return
 
         m_jit.props.latency = self.latency
@@ -161,7 +163,7 @@ class CombinedRTSPClient:
             el.sync_state_with_parent()
 
         if not (m_jit.link(m_caps) and m_caps.link(m_sink)):
-            logger.error("Metadata branch link failure")
+            self._report_error("Metadata Branch", "Failed to link metadata pipeline elements")
             return
 
         self.m_jit = m_jit
@@ -179,8 +181,7 @@ class CombinedRTSPClient:
             self.stop()
         elif msg.type == Gst.MessageType.ERROR:
             err, dbg = msg.parse_error()
-            logger.error("Gst Error: %s | %s", err.message, dbg)
-            self.err_cnt += 1
+            self._report_error("GStreamer Error", f"{err.message} | {dbg}")
 
     def _on_pad_added(self, _src: Gst.Element, pad: Gst.Pad) -> None:
         caps = pad.get_current_caps()
@@ -222,8 +223,7 @@ class CombinedRTSPClient:
 
         ok, rtp_buf = GstRtp.RTPBuffer.map(buf, Gst.MapFlags.READ)
         if not ok:
-            logger.error("Failed to map RTP buffer")
-            self.err_cnt += 1
+            self._report_error("RTP Buffer", "Failed to map RTP buffer")
             return Gst.PadProbeReturn.OK
 
         try:
@@ -261,14 +261,14 @@ class CombinedRTSPClient:
         self._timers['vid_sample'] = time.time()
         sample = sink.emit('pull-sample')
         if not sample:
-            self.err_cnt += 1
+            self._report_error("Video Sample", "No sample received from video sink")
             return Gst.FlowReturn.ERROR
         self.video_cnt += 1
 
         buf = sample.get_buffer()
         ok, info = _map_buffer(buf)
         if not ok:
-            self.err_cnt += 1
+            self._report_error("Video Buffer", "Failed to map video buffer")
             return Gst.FlowReturn.ERROR
 
         struct = sample.get_caps().get_structure(0)
@@ -279,9 +279,8 @@ class CombinedRTSPClient:
         try:
             frame = _to_rgb_array(info, width, height, fmt)
         except Exception as e:
-            logger.error("Frame parse error: %s", e)
+            self._report_error("Frame Parse", f"Frame parsing failed: {e}", e)
             buf.unmap(info)
-            self.err_cnt += 1
             return Gst.FlowReturn.ERROR
         buf.unmap(info)
 
@@ -290,8 +289,7 @@ class CombinedRTSPClient:
             try:
                 frame = self.video_proc_fn(frame, self.shared_cfg)
             except Exception as e:
-                logger.error("Processing error: %s", e)
-                self.err_cnt += 1
+                self._report_error("Video Processing", f"User processing function failed: {e}", e)
             self._timers['vid_proc'] = time.time() - start
 
         payload = {
@@ -304,8 +302,7 @@ class CombinedRTSPClient:
             try:
                 self.video_frame_cb(payload)
             except Exception as e:
-                logger.error("video callback error: %s", e)
-                self.err_cnt += 1
+                self._report_error("Video Callback", f"Video frame callback failed: {e}", e)
             self._timers['vid_cb'] = time.time() - start
 
         return Gst.FlowReturn.OK
@@ -313,26 +310,26 @@ class CombinedRTSPClient:
     def _on_new_meta_sample(self, sink: Gst.Element) -> Gst.FlowReturn:
         sample = sink.emit('pull-sample')
         if not sample:
-            self.err_cnt += 1
+            self._report_error("Metadata Sample", "No sample received from metadata sink")
             return Gst.FlowReturn.ERROR
         self.meta_cnt += 1
 
         buf = sample.get_buffer()
         ok, info = _map_buffer(buf)
         if not ok:
-            self.err_cnt += 1
+            self._report_error("Metadata Buffer", "Failed to map metadata buffer")
             return Gst.FlowReturn.ERROR
 
         raw = info.data
         buf.unmap(info)
 
         if len(raw) < 12:
-            self.err_cnt += 1
+            self._report_error("RTP Header", "RTP packet too short (< 12 bytes)")
             return Gst.FlowReturn.ERROR
         csrc = raw[0] & 0x0F
         hdr_len = 12 + 4 * csrc
         if len(raw) < hdr_len:
-            self.err_cnt += 1
+            self._report_error("RTP Header", f"Incomplete RTP header: expected {hdr_len} bytes, got {len(raw)}")
             return Gst.FlowReturn.ERROR
         marker = bool(raw[1] & 0x80)
         self._xml_acc += raw[hdr_len:]
@@ -342,15 +339,14 @@ class CombinedRTSPClient:
 
         start = self._xml_acc.find(b"<")
         if start < 0:
-            self.err_cnt += 1
+            self._report_error("XML Parse", "XML start marker '<' not found in accumulated data")
             self._xml_acc = b""
             return Gst.FlowReturn.OK
 
         try:
             xml = self._xml_acc[start:].decode('utf-8')
         except Exception as e:
-            logger.error("XML decode error: %s", e)
-            self.err_cnt += 1
+            self._report_error("XML Decode", f"Failed to decode XML: {e}", e)
             self._xml_acc = b""
             return Gst.FlowReturn.OK
 
@@ -361,8 +357,7 @@ class CombinedRTSPClient:
             try:
                 self.metadata_cb(payload)
             except Exception as e:
-                logger.error("metadata callback error: %s", e)
-                self.err_cnt += 1
+                self._report_error("Metadata Callback", f"Metadata callback failed: {e}", e)
         return Gst.FlowReturn.OK
 
     def _video_diag(self) -> Dict[str, Any]:
@@ -384,6 +379,25 @@ class CombinedRTSPClient:
             'uptime': (time.time() - self.start_time) if self.start_time else 0
         }
 
+    def _report_error(self, error_type: str, message: str, exception: Optional[Exception] = None) -> None:
+        """Report an error through logging, counting, and callback."""
+        self.err_cnt += 1
+        logger.debug(f"gstreamer_data_grabber got error: {error_type}: {message}")
+        
+        if self.error_cb:
+            error_payload = {
+                'error_type': error_type,
+                'message': message,
+                'exception': str(exception) if exception else None,
+                'error_count': self.err_cnt,
+                'timestamp': time.time(),
+                'uptime': (time.time() - self.start_time) if self.start_time else 0
+            }
+            try:
+                self.error_cb(error_payload)
+            except Exception as cb_error:
+                logger.error("Error callback failed: %s", cb_error)
+
     def start(self) -> None:
         """Start the GStreamer pipeline and main loop."""
         logger.info("Starting CombinedRTSPClient")
@@ -393,7 +407,7 @@ class CombinedRTSPClient:
         try:
             self.loop.run()
         except Exception as e:
-            logger.error("Main loop error: %s", e)
+            self._report_error("Main Loop", f"Main loop error: {e}", e)
             self.stop()
 
     def stop(self) -> None:
@@ -435,12 +449,19 @@ def run_combined_client_simple_example(
     def sess_cb(md: dict) -> None:
         logger.debug("SESSION-MD: %s", md)
 
+    def err_cb(error: dict) -> None:
+        if queue:
+            queue.put({**error, 'kind': 'error'})
+        else:
+            logger.error("ERROR %s: %s", error.get('error_type'), error.get('message'))
+
     client = CombinedRTSPClient(
         rtsp_url,
         latency=latency,
         video_frame_callback=vid_cb,
         metadata_callback=meta_cb,
         session_metadata_callback=sess_cb,
+        error_callback=err_cb,
         video_processing_fn=video_processing_fn,
         shared_config=shared_config or {},
     )
@@ -492,8 +513,10 @@ if __name__ == "__main__":
                     cv2.imshow("Video", item["data"])
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
-                else:
+                elif item["kind"] == "metadata":
                     print("XML:", item["data"])
+                elif item["kind"] == "error":
+                    print(f"ERROR: {item.get('error_type', 'Unknown')}: {item.get('message', 'Unknown error')}")
             except Exception:
                 continue
     except KeyboardInterrupt:
