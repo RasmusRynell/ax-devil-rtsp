@@ -1,25 +1,28 @@
 import pytest
-from ax_devil_rtsp.metadata_gstreamer import SceneMetadataClient
+pytest.importorskip("gi")
+pytest.importorskip("numpy")
+from ax_devil_rtsp.examples.metadata_gstreamer import SceneMetadataClient
 import threading
 import queue
 import time
 
+@pytest.mark.requires_gstreamer
 def test_metadata_client_creation(rtsp_url):
     """Test that client can be created without errors."""
     client = SceneMetadataClient(rtsp_url, latency=100)
     assert client is not None
     assert client.pipeline is not None
 
-@pytest.mark.camera_required
-def test_metadata_client_receives_data(rtsp_url):
+@pytest.mark.requires_gstreamer
+def test_metadata_client_receives_data(gst_rtsp_server):
     """Test that client can receive metadata from camera."""
     metadata_queue = queue.Queue()
     
     def callback(xml_text):
         metadata_queue.put(xml_text)
     
-    client = SceneMetadataClient(rtsp_url + "?analytics=polygon", 
-                              latency=100, 
+    client = SceneMetadataClient(gst_rtsp_server + "?analytics=polygon",
+                              latency=100,
                               raw_data_callback=callback)
     
     # Start client in separate thread

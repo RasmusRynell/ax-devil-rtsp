@@ -1,7 +1,13 @@
 import unittest
 from unittest.mock import MagicMock, patch
 import socket
-from ax_devil_rtsp.metadata_raw import SceneMetadataRawClient
+import sys
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+
+# Load the metadata_raw module directly to avoid importing package __init__
+module_path = Path(__file__).resolve().parents[1] / "src" / "ax_devil_rtsp" / "examples" / "metadata_raw.py"
+SceneMetadataRawClient = SourceFileLoader("metadata_raw", str(module_path)).load_module().SceneMetadataRawClient
 
 class TestSceneMetadataRawClient(unittest.TestCase):
     def setUp(self):

@@ -1,18 +1,22 @@
 import pytest
-from ax_devil_rtsp.video_gstreamer import VideoGStreamerClient
+pytest.importorskip("gi")
+pytest.importorskip("cv2")
+pytest.importorskip("numpy")
+from ax_devil_rtsp.examples.video_gstreamer import VideoGStreamerClient
 import threading
 import queue
 import numpy as np
 import time
 
+@pytest.mark.requires_gstreamer
 def test_video_client_creation(rtsp_url):
     """Test that video client can be created without errors."""
     client = VideoGStreamerClient(rtsp_url, latency=100)
     assert client is not None
     assert client.pipeline is not None
 
-@pytest.mark.camera_required
-def test_video_client_receives_frames(rtsp_url):
+@pytest.mark.requires_gstreamer
+def test_video_client_receives_frames(gst_rtsp_server):
     """Test that client can receive video frames from camera."""
     frame_queue = queue.Queue()
     
@@ -20,9 +24,9 @@ def test_video_client_receives_frames(rtsp_url):
         if frame is not None:  # Only queue complete frames
             frame_queue.put((frame, rtp_info))
     
-    client = VideoGStreamerClient(rtsp_url, 
-                                latency=100, 
-                                frame_handler_callback=callback)
+    client = VideoGStreamerClient(gst_rtsp_server,
+                                  latency=100,
+                                  frame_handler_callback=callback)
     
     # Start client in separate thread
     thread = threading.Thread(target=client.start)

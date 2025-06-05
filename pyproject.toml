@@ -43,7 +43,8 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v"
 markers = [
-    "camera_required: marks tests that require a physical camera connection",
+    "requires_hardware: marks tests that require physical hardware",
+    "requires_gstreamer: marks tests that need GStreamer installation",
 ]
 
 [tool.setuptools]

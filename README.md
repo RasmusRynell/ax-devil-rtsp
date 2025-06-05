@@ -144,6 +144,18 @@ ax-devil-rtsp metadata --ip 192.168.1.90 --username admin --password secret
 </p>
 </details>
 
+---
+
+## 🧪 Running Tests
+
+The project uses `pytest`. GStreamer tests start a local `gst-rtsp-server`
+streaming a test pattern so no physical camera is required. Make sure
+GStreamer and `gst-rtsp-server` are installed and run:
+
+```bash
+pytest -m "requires_gstreamer" -v
+```
+
 
 > **Note:** For more CLI examples and detailed API documentation, check the [examples directory](src/ax_devil_rtsp/examples) in the source code.
 
