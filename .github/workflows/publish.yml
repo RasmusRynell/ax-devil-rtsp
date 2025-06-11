@@ -48,13 +48,14 @@ jobs:
             python3-gi \
             python3-gst-1.0
           
-          pip install pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install -e .
 
       - name: Run tests
-        run: USE_REAL_CAMERA=false pytest tests/ -v
+        run: |
+          export PYTHONPATH=/usr/lib/python3/dist-packages:$PYTHONPATH
+          USE_REAL_CAMERA=false pytest tests/ -v
 
   build-and-publish:
     needs: test
