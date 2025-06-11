@@ -44,7 +44,12 @@ jobs:
             gstreamer1.0-gl \
             gstreamer1.0-gtk3 \
             gstreamer1.0-qt5 \
-            gstreamer1.0-pulseaudio
+            gstreamer1.0-pulseaudio \
+            python3-gi \
+            python3-gst-1.0
+
+          # Install Python bindings for GStreamer and numerical libraries
+          pip install PyGObject==3.50.0 numpy
           
           pip install pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
@@ -52,7 +57,9 @@ jobs:
           pip install -e .
 
       - name: Run tests
-        run: USE_REAL_CAMERA=false pytest tests/ -v
+        run: |
+          export PYTHONPATH=/usr/lib/python3/dist-packages:$PYTHONPATH
+          USE_REAL_CAMERA=false pytest tests/ -v
 
   build-and-publish:
     needs: test
