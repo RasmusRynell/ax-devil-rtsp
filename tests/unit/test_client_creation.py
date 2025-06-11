@@ -163,4 +163,37 @@ def test_video_client_invalid_rtsp_url():
         
     finally:
         client.stop() 
+        thread.join(timeout=3)
+
+
+@pytest.mark.requires_gstreamer
+def test_combined_client_connection_to_unreachable_server():
+    """Test that combined client properly handles unreachable RTSP server (unit test)."""
+    import threading
+    import time
+    
+    # Use reserved IP address that is guaranteed to be unreachable
+    # 192.0.2.0/24 is reserved for documentation and testing (RFC 3330)
+    unreachable_url = "rtsp://192.0.2.1:12345/nonexistent"
+    
+    client = CombinedRTSPClient(unreachable_url, latency=100, timeout=2.0)
+    
+    thread = threading.Thread(target=client.start)
+    thread.daemon = True  
+    thread.start()
+    
+    try:
+        print(f"Testing unreachable RTSP server: {unreachable_url}")
+        time.sleep(4.0)  # Wait longer than timeout to ensure failure
+        
+        # Should have connection errors from unreachable server
+        assert client.err_cnt > 0, f"Should have connection errors to unreachable server, got {client.err_cnt}"
+        
+        # Should not have received any video frames
+        assert client.video_cnt == 0, f"Should not receive video from unreachable server, got {client.video_cnt}"
+        
+        print(f"✅ Properly failed to connect to unreachable server - Errors: {client.err_cnt}, Video: {client.video_cnt}")
+        
+    finally:
+        client.stop()
         thread.join(timeout=3) 

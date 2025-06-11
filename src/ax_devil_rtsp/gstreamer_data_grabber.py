@@ -33,9 +33,6 @@ def _to_rgb_array(info: Gst.MapInfo, width: int, height: int, fmt: str) -> np.nd
         return np.frombuffer(data, np.uint8).reshape(height, width, 3)
     if fmt in ("RGB16", "BGR16"):
         return np.frombuffer(data, np.uint16).reshape(height, width)
-    if fmt == "NV12":
-        arr = np.frombuffer(data, np.uint8).reshape(int(height * 1.5), width)
-        return cv2.cvtColor(arr, cv2.COLOR_YUV2RGB_NV12)
     raise ValueError(f"Unsupported pixel format {fmt}")
 
 
@@ -68,6 +65,7 @@ class CombinedRTSPClient:
         # Thread control
         self._loop_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._timer: Optional[threading.Timer] = None
 
         # Diagnostic counters and state
         self.start_time: Optional[float] = None
@@ -186,12 +184,12 @@ class CombinedRTSPClient:
     def _on_bus_message(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
         if msg.type == Gst.MessageType.EOS:
             logger.info("EOS received")
-            self.stop()
+            GLib.idle_add(self.stop)
         elif msg.type == Gst.MessageType.ERROR:
             err, dbg = msg.parse_error()
             self._report_error("GStreamer Error", f"{err.message} | {dbg}")
-            # Stop on error to prevent hanging
-            self.stop()
+            # Stop on error to prevent hanging - use idle_add to avoid thread join issue
+            GLib.idle_add(self.stop)
 
     def _on_pad_added(self, _src: Gst.Element, pad: Gst.Pad) -> None:
         caps = pad.get_current_caps()
@@ -330,7 +328,9 @@ class CombinedRTSPClient:
             self._report_error("Metadata Buffer", "Failed to map metadata buffer")
             return Gst.FlowReturn.ERROR
 
-        raw = info.data
+        # Copy the data before unmapping the buffer, 
+        # TODO: performance improvement possible by not copying
+        raw = bytes(info.data)
         buf.unmap(info)
 
         if len(raw) < 12:
@@ -434,9 +434,9 @@ class CombinedRTSPClient:
         
         # Handle timeout if specified
         if self.timeout:
-            timer = threading.Timer(self.timeout, self._timeout_handler)
-            timer.daemon = True
-            timer.start()
+            self._timer = threading.Timer(self.timeout, self._timeout_handler)
+            self._timer.daemon = True
+            self._timer.start()
 
     def _timeout_handler(self) -> None:
         """Handle timeout by stopping the client."""
@@ -452,6 +452,11 @@ class CombinedRTSPClient:
             
         logger.info("Stopping CombinedRTSPClient")
         self._stop_event.set()
+        
+        # Cancel timeout timer if it exists
+        if self._timer:
+            self._timer.cancel()
+            self._timer = None
         
         # Stop pipeline
         self.pipeline.set_state(Gst.State.NULL)

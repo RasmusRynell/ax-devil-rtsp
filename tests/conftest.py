@@ -46,125 +46,48 @@ def rtsp_test_server():
     3. Serves H.264 video stream like Axis camera
     4. Requires clients to authenticate and connect properly
     
+    Uses the AxisRTSPServer class from enhanced_rtsp_server.py
     """
     try:
-        import gi
-        gi.require_version("Gst", "1.0")
-        gi.require_version("GstRtspServer", "1.0")
-        from gi.repository import Gst, GstRtspServer, GLib
-    except Exception as exc:  # pragma: no cover - runtime dependency
-        pytest.skip(f"GStreamer not available: {exc}")
-
-    import threading
-    import time
-
-    Gst.init(None)
-    server = GstRtspServer.RTSPServer()
-    server.props.service = "8554"
+        from tests.enhanced_rtsp_server import AxisRTSPServer
+    except ImportError as e:
+        pytest.skip(f"Test server dependencies not available: {e}")
     
-    # Create media factory that mimics Axis camera behavior
-    factory = GstRtspServer.RTSPMediaFactory()
-    
-    # REAL RTSP server pipeline - serves actual H.264 stream via RTSP protocol
-    # Client MUST connect via RTSP and receive this stream over network
-    pipeline = (
-        "( videotestsrc is-live=true pattern=ball "
-        "! video/x-raw,width=640,height=480,framerate=30/1 "
-        "! x264enc tune=zerolatency bitrate=1000 speed-preset=ultrafast "
-        "! rtph264pay name=pay0 pt=96 config-interval=1 )"
-    )
-    
-    factory.set_launch(pipeline)
-    factory.set_shared(True)
-    
-    # Mount at Axis-like path
-    mount_points = server.get_mount_points()
-    mount_points.add_factory("/axis-media/media.amp", factory)
-    server.attach(None)
-
-    # Start RTSP server in separate thread
-    loop = GLib.MainLoop()
-    thread = threading.Thread(target=loop.run, daemon=True)
-    thread.start()
-    
-    # Give server time to start and be ready for RTSP connections
-    time.sleep(3)
-    
-    # Return URL that clients must connect to via RTSP protocol
-    server_url = "rtsp://127.0.0.1:8554/axis-media/media.amp"
-    print(f"\n🖥️  RTSP TEST SERVER RUNNING: {server_url}")
-    print("   Clients MUST connect via actual RTSP protocol")
-    
-    yield server_url
-
-    # Graceful shutdown - daemon threads will clean up automatically
     try:
-        loop.quit()
-    except:
-        pass
+        server = AxisRTSPServer(port=8554)
+        url = server.start()
+        print(f"\n🖥️  RTSP TEST SERVER RUNNING: {url}")
+        print("   Clients MUST connect via actual RTSP protocol")
+        yield url
+        server.stop()
+    except Exception as exc:
+        # Don't skip - let the test fail! This indicates a real problem
+        raise RuntimeError(f"RTSP test server failed to start: {exc}") from exc
 
 @pytest.fixture(scope="session")
 def axis_metadata_rtsp_server():
     """
-    RTSP server that mimics Axis camera with BOTH video and metadata streams.
+    RTSP server that mimics Axis camera with BOTH video and application metadata streams.
     
     This serves the combined stream that CombinedRTSPClient expects.
     Clients must connect via RTSP protocol to receive both streams.
+    
+    Uses the DualStreamAxisRTSPServer class from enhanced_rtsp_server.py
     """
     try:
-        import gi
-        gi.require_version("Gst", "1.0")
-        gi.require_version("GstRtspServer", "1.0")
-        from gi.repository import Gst, GstRtspServer, GLib
-    except Exception as exc:
-        pytest.skip(f"GStreamer not available: {exc}")
-
-    import threading
-    import time
-
-    Gst.init(None)
-    server = GstRtspServer.RTSPServer()
-    server.props.service = "8555"
+        from tests.enhanced_rtsp_server import DualStreamAxisRTSPServer
+    except ImportError as e:
+        pytest.skip(f"Test server dependencies not available: {e}")
     
-    factory = GstRtspServer.RTSPMediaFactory()
-    
-    # Dual stream like real Axis camera - video + audio as metadata placeholder
-    pipeline = (
-        # Video stream (main)
-        "( videotestsrc is-live=true pattern=ball "
-        "! video/x-raw,width=640,height=480,framerate=30/1 "
-        "! x264enc tune=zerolatency bitrate=1000 speed-preset=ultrafast "
-        "! rtph264pay name=pay0 pt=96 config-interval=1 ) "
-        
-        # Audio stream (simulates metadata stream for combined client)
-        "( audiotestsrc is-live=true freq=440 "
-        "! audio/x-raw,rate=8000,channels=1 "
-        "! audioconvert ! audioresample "
-        "! rtpL16pay name=pay1 pt=97 )"
-    )
-    
-    factory.set_launch(pipeline)
-    factory.set_shared(True)
-    
-    mount_points = server.get_mount_points()
-    mount_points.add_factory("/axis-media/media.amp", factory)
-    server.attach(None)
-
-    loop = GLib.MainLoop()
-    thread = threading.Thread(target=loop.run, daemon=True)
-    thread.start()
-    time.sleep(3)
-    
-    server_url = "rtsp://127.0.0.1:8555/axis-media/media.amp"
-    print(f"\n🎬 DUAL-STREAM RTSP SERVER: {server_url}")
-    
-    yield server_url
-
-    # Graceful shutdown - daemon threads will clean up automatically
     try:
-        loop.quit()
-    except:
-        pass
+        server = DualStreamAxisRTSPServer(port=8555)
+        url = server.start()
+        print(f"\n🎬 DUAL-STREAM RTSP SERVER: {url}")
+        yield url
+        server.stop()
+    except Exception as exc:
+        # Don't skip - let the test fail! This indicates a real problem
+        raise RuntimeError(f"Dual-stream RTSP test server failed to start: {exc}") from exc
 
 @pytest.fixture(scope="session")
 def test_rtsp_url(rtsp_test_server, rtsp_credentials):
@@ -186,12 +109,12 @@ def test_rtsp_url(rtsp_test_server, rtsp_credentials):
         print(f"\n🧪 RTSP TEST SERVER: {rtsp_test_server}")
         return rtsp_test_server
 
-@pytest.fixture(scope="session") 
+@pytest.fixture(scope="session")
 def combined_test_rtsp_url(axis_metadata_rtsp_server, rtsp_credentials):
     """
     RTSP URL for combined client testing (video + metadata).
     
-    Uses dual-stream server that provides both video and audio streams
+    Uses dual-stream server that provides both video and metadata streams
     to simulate Axis camera behavior for CombinedRTSPClient.
     """
     use_real_camera = os.getenv('USE_REAL_CAMERA', 'false').lower() == 'true'

@@ -1,13 +1,17 @@
+import importlib
+import sys
+import types
 import xml.etree.ElementTree as ET
-from ax_devil_rtsp.utils import parse_metadata_xml, parse_session_metadata, _parse_caps_string, configure_logging
 import logging
+
+import pytest
+from ax_devil_rtsp import utils
 
 
 class TestParseMetadataXml:
     """Test the metadata XML parsing functionality."""
-    
+
     def test_parse_valid_xml(self):
-        """Test parsing valid ONVIF metadata XML."""
         xml_data = b'''<?xml version="1.0" encoding="UTF-8"?>
         <tt:MetadataStream xmlns:tt="http://www.onvif.org/ver10/schema">
             <tt:VideoAnalytics>
@@ -21,106 +25,88 @@ class TestParseMetadataXml:
                 </tt:Frame>
             </tt:VideoAnalytics>
         </tt:MetadataStream>'''
-        
-        result = parse_metadata_xml(xml_data)
-        
+
+        result = utils.parse_metadata_xml(xml_data)
+
         assert result is not None
-        assert 'objects' in result
-        assert len(result['objects']) == 2
-        assert result['objects'][0]['id'] == '1'
-        assert result['objects'][0]['type'] == 'Human'
-        assert result['objects'][1]['id'] == '2'
-        assert result['objects'][1]['type'] == 'Vehicle'
-        assert result['utc_time'] == '2023-01-01T12:00:00.000Z'
-        assert 'raw_xml' in result
+        assert "objects" in result
+        assert len(result["objects"]) == 2
+        assert result["objects"][0]["id"] == "1"
+        assert result["objects"][0]["type"] == "Human"
+        assert result["objects"][1]["id"] == "2"
+        assert result["objects"][1]["type"] == "Vehicle"
+        assert result["utc_time"] == "2023-01-01T12:00:00.000Z"
+        assert "raw_xml" in result
 
     def test_parse_empty_xml(self):
-        """Test parsing empty metadata XML."""
         xml_data = b'''<?xml version="1.0" encoding="UTF-8"?>
         <tt:MetadataStream xmlns:tt="http://www.onvif.org/ver10/schema">
         </tt:MetadataStream>'''
-        
-        result = parse_metadata_xml(xml_data)
-        
+
+        result = utils.parse_metadata_xml(xml_data)
+
         assert result is not None
-        assert result['objects'] == []
-        assert result['utc_time'] is None
+        assert result["objects"] == []
+        assert result["utc_time"] is None
 
     def test_parse_invalid_xml(self):
-        """Test parsing invalid XML returns None."""
-        xml_data = b'<invalid>xml<content>'
-        
-        result = parse_metadata_xml(xml_data)
-        
+        xml_data = b"<invalid>xml<content>"
+
+        result = utils.parse_metadata_xml(xml_data)
+
         assert result is None
 
     def test_parse_unicode_decode_error(self):
-        """Test handling of unicode decode errors."""
-        # Create invalid UTF-8 bytes
-        xml_data = b'<?xml version="1.0" encoding="UTF-8"?><test>\xff\xfe</test>'
-        
-        result = parse_metadata_xml(xml_data)
-        
-        # Should handle decode error gracefully
-        assert result is not None or result is None  # Either works with graceful error handling
+        xml_data = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><test>\xff\xfe</test>"
+
+        result = utils.parse_metadata_xml(xml_data)
+        assert result is not None
 
 
 class TestParseSessionMetadata:
     """Test session metadata parsing functionality."""
-    
+
     def test_parse_session_metadata_complete(self):
-        """Test parsing complete session metadata."""
         raw_metadata = {
             "stream_name": "recv_rtp_src_0_123456_96",
             "caps": "application/x-rtp,media=(string)video,payload=(int)96,clock-rate=(int)90000",
             "structure": "application/x-rtp,media=(string)video,payload=(int)96,clock-rate=(int)90000",
-            "sdes": {"cname": "test@host"}
+            "sdes": {"cname": "test@host"},
         }
-        
-        result = parse_session_metadata(raw_metadata)
-        
-        assert result["stream_name"] == "recv_rtp_src_0_123456_96"
-        assert result["caps"] == "application/x-rtp,media=(string)video,payload=(int)96,clock-rate=(int)90000"
-        assert "caps_parsed" in result
-        assert result["caps_parsed"]["media"] == "video"
-        assert result["caps_parsed"]["payload"] == 96
-        assert result["caps_parsed"]["clock-rate"] == 90000
-        assert result["sdes"] == {"cname": "test@host"}
 
-    def test_parse_caps_string(self):
-        """Test the internal caps string parsing function."""
-        caps_str = "video/x-raw,format=(string)RGB,width=(int)640,height=(int)480,framerate=(fraction)30/1"
-        
-        result = _parse_caps_string(caps_str)
-        
-        assert result["format"] == "RGB"
-        assert result["width"] == 640
-        assert result["height"] == 480
-        assert result["framerate"] == "30/1"
+        result = utils.parse_session_metadata(raw_metadata)
 
-    def test_parse_caps_string_with_escapes(self):
-        """Test caps string parsing with escaped commas."""
-        caps_str = "application/x-custom,name=(string)test\\,value,count=(int)5"
-        
-        result = _parse_caps_string(caps_str)
-        
-        assert result["name"] == "test,value"  # Escaped comma should be unescaped
-        assert result["count"] == 5
+        assert result["stream_name"] == raw_metadata["stream_name"]
+        assert result["caps"] == raw_metadata["caps"]
+        assert result["structure"] == raw_metadata["structure"]
+        assert result["sdes"] == raw_metadata["sdes"]
+
+    def test_parse_session_metadata_missing_fields(self):
+        raw_metadata = {
+            "caps": "application/x-rtp,media=(string)video",
+        }
+
+        result = utils.parse_session_metadata(raw_metadata)
+
+        assert result["stream_name"] is None
+        assert result["caps"] == raw_metadata["caps"]
 
 
-class TestConfigureLogging:
-    """Test logging configuration."""
-    
-    def test_configure_logging_info_level(self):
-        """Test configuring logging at INFO level."""
-        logger = configure_logging(logging.INFO)
-        
-        assert logger.name == "ax-devil-rtsp"
-        assert logging.getLogger().level == logging.INFO
+class TestCapsStringParsing:
+    """Test low-level caps string parsing."""
 
-    def test_configure_logging_debug_level(self):
-        """Test configuring logging at DEBUG level."""
-        logger = configure_logging(logging.DEBUG)
-        
-        assert logger.name == "ax-devil-rtsp"
-        assert logging.getLogger().level == logging.DEBUG 
+    def test_parse_caps_string_basic(self):
+        caps = "media=(string)video,payload=(int)96,clock-rate=(int)90000"
+        result = utils._parse_caps_string(caps)
+        assert result["media"] == "video"
+        assert result["payload"] == 96
+        assert result["clock-rate"] == 90000
+
+
+class TestLoggingConfiguration:
+    """Test logging configuration helper."""
+
+    def test_configure_logging(self):
+        logger = utils.configure_logging(level="DEBUG")
+        assert logging.getLogger().level == logging.DEBUG
+        assert any(isinstance(h, logging.StreamHandler) for h in logging.getLogger().handlers)

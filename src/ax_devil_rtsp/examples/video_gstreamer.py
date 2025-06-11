@@ -355,18 +355,6 @@ class VideoGStreamerClient:
                 self.error_count += 1
                 return Gst.FlowReturn.ERROR
             frame = np.frombuffer(map_info.data, dtype=np.uint16).reshape((height, width))
-        elif pixel_format == "NV12":
-            expected_size = int(width * height * 1.5)
-            if len(map_info.data) < expected_size:
-                logger.error(
-                    "Buffer size (%d) is smaller than expected NV12 frame size (%d).",
-                    len(map_info.data), expected_size
-                )
-                buffer.unmap(map_info)
-                self.error_count += 1
-                return Gst.FlowReturn.ERROR
-            nv12_frame = np.frombuffer(map_info.data, dtype=np.uint8).reshape((int(height * 1.5), width))
-            frame = cv2.cvtColor(nv12_frame, cv2.COLOR_YUV2RGB_NV12)
         else:
             logger.error("Unhandled pixel format: %s", pixel_format)
             buffer.unmap(map_info)
