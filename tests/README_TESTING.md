@@ -1,6 +1,6 @@
 # Testing Guide for ax-devil-rtsp
 
-> Comprehensive testing documentation for the ax-devil-rtsp library's 89 test suite
+> Comprehensive testing documentation for the ax-devil-rtsp library's 85 test suite
 
 ## 📋 Table of Contents
 
@@ -40,9 +40,9 @@ pytest tests/ -v
 ## 🧪 Test Architecture
 
 ### Overview
-**90 Total Tests** organized into **two distinct categories**:
-- **Unit Tests: 52** - Hardware-independent, always pass
-- **Integration Tests: 38** - Hardware-dependent, may fail when camera unavailable
+**85 Total Tests** organized into **two distinct categories**:
+- **Unit Tests: 49** - Hardware-independent, always pass
+- **Integration Tests: 36** - Hardware-dependent, may fail when camera unavailable
 
 ### Test Categories
 
@@ -70,14 +70,14 @@ Integration tests receive RTSP URLs via fixtures and test against them transpare
 
 ```
 tests/
-├── unit/                                     # 52 tests - Hardware-independent
+├── unit/                                     # 49 tests - Hardware-independent
 │   ├── test_cli.py                          # CLI argument parsing & URL building
 │   ├── test_client_creation.py              # Object creation & configuration
 │   ├── test_focused_gstreamer_unit_errors.py # Error handling (no network)
 │   ├── test_gstreamer_data_grabber_unit.py  # Core logic testing
 │   └── test_utils.py                        # Utility functions
 │
-├── integration/                              # 38 tests - Hardware-dependent
+├── integration/                              # 36 tests - Hardware-dependent
 │   ├── test_combined_gstreamer.py           # Combined video+metadata client
 │   ├── test_comprehensive_rtsp.py           # Deep RTSP functionality
 │   ├── test_enhanced_rtsp_integration.py    # Multi-stream testing
@@ -176,7 +176,7 @@ pytest tests/
 ```
 - ✅ **Unit tests**: Always pass (hardware-independent)  
 - ✅ **Integration tests**: Pass using local RTSP servers
-- ✅ **All 89 tests**: Expected to pass
+- ✅ **All 85 tests**: Expected to pass
 
 #### **Real Camera Mode**
 ```bash
@@ -278,14 +278,14 @@ Tests fail organically when they cannot connect to provided URLs:
 
 ### Test Breakdown by File
 
-#### **Unit Tests** (52 tests)
+#### **Unit Tests** (49 tests)
 - **test_cli.py** (7 tests): CLI argument parsing, URL building
 - **test_client_creation.py** (8 tests): Object creation, callback setup
 - **test_focused_gstreamer_unit_errors.py** (2 tests): Pipeline/element creation errors
 - **test_gstreamer_data_grabber_unit.py** (22 tests): Core logic, RTP parsing, format conversions
 - **test_utils.py** (13 tests): XML parsing, session metadata, logging
 
-#### **Integration Tests** (38 tests)
+#### **Integration Tests** (36 tests)
 - **test_combined_gstreamer.py** (5 tests): Combined video+metadata client
 - **test_comprehensive_rtsp.py** (6 tests): Deep RTSP functionality
 - **test_enhanced_rtsp_integration.py** (3 tests): Multi-stream testing
@@ -293,7 +293,7 @@ Tests fail organically when they cannot connect to provided URLs:
 - **test_focused_gstreamer_integration_success.py** (6 tests): Success validation
 - **test_gstreamer_data_grabber_integration.py** (7 tests): Core integration
 - **test_metadata_gstreamer.py** (2 tests): Metadata client
-- **test_video_gstreamer.py** (3 tests): Video client
+- **test_video_gstreamer.py** (1 test): Video client
 
 ## 🔧 Environment Configuration
 

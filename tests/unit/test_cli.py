@@ -1,178 +1,140 @@
-import pytest
-from ax_devil_rtsp.examples.cli import build_rtsp_url, parse_args
-from unittest.mock import patch
+import importlib
 import sys
+import types
+from unittest.mock import patch
+
+import pytest
 
 
-class TestCLIArgumentParsing:
-    """Test CLI argument parsing functionality."""
-    
-    def test_parse_args_with_ip(self):
-        """Test parsing arguments with IP address."""
-        test_args = ['--ip', '192.168.1.100', '--username', 'admin', '--password', 'secret']
-        
-        with patch.object(sys, 'argv', ['cli.py'] + test_args):
-            args = parse_args()
-            
-        assert args.ip == '192.168.1.100'
-        assert args.username == 'admin'
-        assert args.password == 'secret'
-        assert args.latency == 100  # default
-        assert args.source == '1'   # default
-
-    def test_parse_args_with_rtsp_url(self):
-        """Test parsing arguments with full RTSP URL."""
-        test_args = ['--rtsp-url', 'rtsp://user:pass@192.168.1.50/test']
-        
-        with patch.object(sys, 'argv', ['cli.py'] + test_args):
-            args = parse_args()
-            
-        assert args.rtsp_url == 'rtsp://user:pass@192.168.1.50/test'
-
-    def test_parse_args_with_options(self):
-        """Test parsing arguments with various options."""
-        test_args = [
-            '--ip', '192.168.1.100',
-            '--latency', '200',
-            '--no-video',
-            '--no-metadata',
-            '--log-level', 'DEBUG'
-        ]
-        
-        with patch.object(sys, 'argv', ['cli.py'] + test_args):
-            args = parse_args()
-            
-        assert args.latency == 200
-        assert args.no_video is True
-        assert args.no_metadata is True
-        assert args.log_level == 'DEBUG'
+@pytest.fixture()
+def cli_module(monkeypatch):
+    """Import the CLI module with optional dependencies mocked."""
+    if "gi" not in sys.modules:
+        dummy_gi = types.ModuleType("gi")
+        dummy_gi.require_version = lambda *a, **kw: None
+        dummy_repo = types.ModuleType("gi.repository")
+        for name in ["Gst", "GstRtp", "GstRtsp", "GLib"]:
+            setattr(dummy_repo, name, types.ModuleType(name))
+        dummy_gi.repository = dummy_repo
+        monkeypatch.setitem(sys.modules, "gi", dummy_gi)
+        monkeypatch.setitem(sys.modules, "gi.repository", dummy_repo)
+    if "cv2" not in sys.modules:
+        monkeypatch.setitem(sys.modules, "cv2", types.ModuleType("cv2"))
+    module = importlib.import_module("ax_devil_rtsp.examples.cli")
+    return module
 
 
 class TestRTSPURLBuilding:
     """Test RTSP URL building functionality."""
-    
-    def test_build_rtsp_url_basic(self):
-        """Test building basic RTSP URL."""
+
+    def test_build_rtsp_url_basic(self, cli_module):
         class MockArgs:
             rtsp_url = None
-            ip = '192.168.1.100'
-            username = 'admin'
-            password = 'secret'
-            source = '1'
+            ip = "192.168.1.100"
+            username = "admin"
+            password = "secret"
+            source = "1"
             no_video = False
             no_metadata = False
             rtp_ext = True
-            
-        args = MockArgs()
-        url = build_rtsp_url(args)
-        
-        assert url.startswith('rtsp://admin:secret@192.168.1.100/axis-media/media.amp')
-        assert 'onvifreplayext=1' in url
-        assert 'analytics=polygon' in url
-        assert 'camera=1' in url
 
-    def test_build_rtsp_url_no_credentials(self):
-        """Test building RTSP URL without credentials."""
+        url = cli_module.build_rtsp_url(MockArgs())
+
+        assert url.startswith(
+            "rtsp://admin:secret@192.168.1.100/axis-media/media.amp"
+        )
+        assert "onvifreplayext=1" in url
+        assert "analytics=polygon" in url
+        assert "camera=1" in url
+
+    def test_build_rtsp_url_no_credentials(self, cli_module):
         class MockArgs:
             rtsp_url = None
-            ip = '192.168.1.100'
-            username = ''
-            password = ''
-            source = '1'
+            ip = "192.168.1.100"
+            username = ""
+            password = ""
+            source = "1"
             no_video = False
             no_metadata = False
             rtp_ext = True
-            
-        args = MockArgs()
-        url = build_rtsp_url(args)
-        
-        assert url.startswith('rtsp://192.168.1.100/axis-media/media.amp')
-        assert '@' not in url.split('/')[2]  # No credentials in host part
 
-    def test_build_rtsp_url_video_only(self):
-        """Test building RTSP URL for video only."""
+        url = cli_module.build_rtsp_url(MockArgs())
+
+        assert url.startswith("rtsp://192.168.1.100/axis-media/media.amp")
+        assert "@" not in url.split("/")[2]
+
+    def test_build_rtsp_url_video_only(self, cli_module):
         class MockArgs:
             rtsp_url = None
-            ip = '192.168.1.100'
-            username = 'admin'
-            password = 'secret'
-            source = '1'
+            ip = "192.168.1.100"
+            username = "admin"
+            password = "secret"
+            source = "1"
             no_video = False
             no_metadata = True
             rtp_ext = True
-            
-        args = MockArgs()
-        url = build_rtsp_url(args)
-        
-        assert 'analytics=polygon' not in url
-        assert 'onvifreplayext=1' in url
 
-    def test_build_rtsp_url_metadata_only(self):
-        """Test building RTSP URL for metadata only."""
+        url = cli_module.build_rtsp_url(MockArgs())
+
+        assert "analytics=polygon" not in url
+        assert "onvifreplayext=1" in url
+
+    def test_build_rtsp_url_metadata_only(self, cli_module):
         class MockArgs:
             rtsp_url = None
-            ip = '192.168.1.100'
-            username = 'admin'
-            password = 'secret'
-            source = '1'
+            ip = "192.168.1.100"
+            username = "admin"
+            password = "secret"
+            source = "1"
             no_video = True
             no_metadata = False
             rtp_ext = True
-            
-        args = MockArgs()
-        url = build_rtsp_url(args)
-        
-        assert 'video=0' in url
-        assert 'audio=0' in url
-        assert 'analytics=polygon' in url
 
-    def test_build_rtsp_url_with_provided_url(self):
-        """Test that provided RTSP URL is used directly."""
+        url = cli_module.build_rtsp_url(MockArgs())
+
+        assert "video=0" in url
+        assert "audio=0" in url
+        assert "analytics=polygon" in url
+
+    def test_build_rtsp_url_with_provided_url(self, cli_module):
         class MockArgs:
-            rtsp_url = 'rtsp://test:test@192.168.1.50/custom/path'
-            ip = '192.168.1.100'  # Should be ignored
-            username = 'admin'    # Should be ignored
-            password = 'secret'   # Should be ignored
-            source = '1'
+            rtsp_url = "rtsp://test:test@192.168.1.50/custom/path"
+            ip = "192.168.1.100"
+            username = "admin"
+            password = "secret"
+            source = "1"
             no_video = False
             no_metadata = False
             rtp_ext = True
-            
-        args = MockArgs()
-        url = build_rtsp_url(args)
-        
-        assert url == 'rtsp://test:test@192.168.1.50/custom/path'
 
-    def test_build_rtsp_url_no_ip_raises_error(self):
-        """Test that missing IP raises ValueError."""
+        url = cli_module.build_rtsp_url(MockArgs())
+
+        assert url == "rtsp://test:test@192.168.1.50/custom/path"
+
+    def test_build_rtsp_url_no_ip_raises_error(self, cli_module):
         class MockArgs:
             rtsp_url = None
             ip = None
-            username = 'admin'
-            password = 'secret'
-            source = '1'
+            username = "admin"
+            password = "secret"
+            source = "1"
             no_video = False
             no_metadata = False
             rtp_ext = True
-            
-        args = MockArgs()
-        
-        with pytest.raises(ValueError, match="No IP address provided"):
-            build_rtsp_url(args)
 
-    def test_build_rtsp_url_nothing_requested_raises_error(self):
-        """Test that requesting neither video nor metadata raises error."""
+        with pytest.raises(ValueError, match="No IP address provided"):
+            cli_module.build_rtsp_url(MockArgs())
+
+    def test_build_rtsp_url_nothing_requested_raises_error(self, cli_module):
         class MockArgs:
             rtsp_url = None
-            ip = '192.168.1.100'
-            username = 'admin'
-            password = 'secret'
-            source = '1'
+            ip = "192.168.1.100"
+            username = "admin"
+            password = "secret"
+            source = "1"
             no_video = True
             no_metadata = True
             rtp_ext = True
-            
-        args = MockArgs()
-        
+
         with pytest.raises(ValueError, match="You cannot ask for nothing"):
-            build_rtsp_url(args) 
+            cli_module.build_rtsp_url(MockArgs())

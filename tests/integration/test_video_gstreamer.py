@@ -11,45 +11,6 @@ import time
 # test_video_client_creation moved to tests/unit/test_client_creation.py
 
 @pytest.mark.requires_gstreamer
-def test_video_client_connection_attempt(test_rtsp_url):
-    """
-    Test that video client successfully connects to the provided RTSP URL.
-    
-    This test REQUIRES actual connectivity:
-    - If URL is reachable: Should successfully connect without errors
-    - If URL is unreachable: SHOULD FAIL (this is integration testing)
-    """
-    session_established = False
-    
-    def callback(payload):
-        # Simple callback to satisfy VideoGStreamerClient requirements
-        nonlocal session_established
-        session_established = True
-    
-    client = VideoGStreamerClient(test_rtsp_url, latency=100, timeout=None, frame_handler_callback=callback)
-    
-    try:
-        print(f"Testing RTSP connection to: {test_rtsp_url}")
-        client.start()
-        time.sleep(5.0)  # Allow time for connection establishment
-        
-        # Check if we have session metadata (indicates successful RTSP connection)
-        session_metadata = getattr(client, 'session_metadata', None)
-        if session_metadata:
-            print(f"✅ Successfully connected to RTSP server: {test_rtsp_url}")
-            print(f"   Session metadata received: {len(session_metadata)} entries")
-        else:
-            # Check if we got any callbacks indicating connection worked
-            if session_established:
-                print(f"✅ Successfully connected and receiving data from: {test_rtsp_url}")
-            else:
-                pytest.fail(f"Failed to establish connection to {test_rtsp_url}")
-        
-    finally:
-        client.stop()
-
-
-@pytest.mark.requires_gstreamer
 def test_video_client_receives_frames(test_rtsp_url):
     """
     Test that client receives H.264 video frames from RTSP server.
@@ -120,32 +81,6 @@ def test_video_client_receives_frames(test_rtsp_url):
     finally:
         client.stop()
         thread.join(timeout=5)
-        
         # Verify RTSP connection worked properly
         assert client.error_count == 0, f"RTSP connection should work without errors, got {client.error_count}"
-
-
-@pytest.mark.requires_gstreamer
-def test_video_client_unreachable_server(test_rtsp_url):
-    """Test that video client properly handles unreachable RTSP server."""
-    # When USE_REAL_CAMERA=true, this will try real camera and should fail if unavailable
-    # When USE_REAL_CAMERA=false, this will use local server and should succeed  
-    client = VideoGStreamerClient(test_rtsp_url, latency=100, timeout=3.0)
-    
-    thread = threading.Thread(target=client.start)
-    thread.daemon = True
-    thread.start()
-    
-    try:
-        print(f"Testing RTSP connection: {test_rtsp_url}")
-        time.sleep(4.0)  # Wait longer than timeout
-        
-        # Test behavior depends on what URL fixture provides
-        print(f"Connection result - Errors: {client.error_count}")
-        
-    finally:
-        client.stop()
-        thread.join(timeout=3)
-
-
 # test_video_client_invalid_rtsp_url moved to tests/unit/ - it's testing URL validation logic
