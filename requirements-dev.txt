@@ -1,3 +1,0 @@
-pytest>=7.0.0
-PyGObject>=3.52.3
-numpy
