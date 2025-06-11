@@ -15,7 +15,7 @@ authors = [
 dependencies = [
     "numpy>=1.20.0",
     "opencv-python>=4.5.0",
-    "PyGObject==3.50.0",
+    "PyGObject>=3.52.3",
     "click>=8.0.0",
     "rich>=13.9.4",
 ]
@@ -27,6 +27,7 @@ dev = [
     "pytest-cov",
     "black",
     "ruff",
+    "opencv-python>=4.5.0",
 ]
 
 [project.urls]
@@ -43,7 +44,8 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v"
 markers = [
-    "camera_required: marks tests that require a physical camera connection",
+    "requires_hardware: marks tests that require physical hardware",
+    "requires_gstreamer: marks tests that need GStreamer installation",
 ]
 
 [tool.setuptools]
