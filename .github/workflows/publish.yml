@@ -33,13 +33,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.python-version }}-pip-
 
-      - name: Install system libraries (headers + GStreamer)
+      - name: Install system libraries (headers + GStreamer introspection)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgirepository-2.0-dev gobject-introspection libcairo2-dev libffi-dev pkg-config gcc \
-                                libglib2.0-dev \
-                                gstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-                                gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools
+          sudo apt-get install -y --no-install-recommends \
+            libgirepository-2.0-dev gobject-introspection libcairo2-dev libffi-dev pkg-config gcc libglib2.0-dev \
+            gstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools \
+            gir1.2-gstreamer-1.0 \
+            gir1.2-gst-plugins-base-1.0
 
       - name: Build PyGObject and project dependencies
         run: |
@@ -50,7 +52,8 @@ jobs:
           pip install -e .
 
       - name: Run tests
-        run: USE_REAL_CAMERA=false pytest tests/ -v
+        run: |
+          USE_REAL_CAMERA=false pytest tests/ -v --maxfail=1
 
   ###########################################################################
   # Build and publish to PyPI on version tags
@@ -76,11 +79,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-3.11-pip-
 
-      - name: Install system libraries (headers + GStreamer)
+      - name: Install system libraries (headers + GStreamer introspection)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgirepository-2.0-dev gobject-introspection libcairo2-dev libffi-dev pkg-config gcc libglib2.0-dev \
-                                gstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-tools
+          sudo apt-get install -y --no-install-recommends \
+            libgirepository-2.0-dev gobject-introspection libcairo2-dev libffi-dev pkg-config gcc libglib2.0-dev \
+            gstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-tools \
+            gir1.2-gstreamer-1.0 \
+            gir1.2-gst-plugins-base-1.0
 
       - name: Install build dependencies
         run: |
@@ -97,4 +103,5 @@ jobs:
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload dist/*
+        run: |
+          twine upload dist/*
