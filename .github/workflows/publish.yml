@@ -10,14 +10,17 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11']
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: |
@@ -41,22 +44,15 @@ jobs:
             gstreamer1.0-gl \
             gstreamer1.0-gtk3 \
             gstreamer1.0-qt5 \
-            gstreamer1.0-pulseaudio \
-            python3-gi \
-            python3-gst-1.0
+            gstreamer1.0-pulseaudio
 
-          # Install Python bindings for GStreamer and numerical libraries
-          pip install PyGObject==3.50.0 numpy
-          
           pip install pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install -e .
 
       - name: Run tests
-        run: |
-          export PYTHONPATH=/usr/lib/python3/dist-packages:$PYTHONPATH
-          USE_REAL_CAMERA=false pytest tests/ -v
+        run: USE_REAL_CAMERA=false pytest tests/ -v
 
   build-and-publish:
     needs: test
