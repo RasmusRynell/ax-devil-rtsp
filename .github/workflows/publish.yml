@@ -44,15 +44,18 @@ jobs:
             gstreamer1.0-gl \
             gstreamer1.0-gtk3 \
             gstreamer1.0-qt5 \
-            gstreamer1.0-pulseaudio
-
-          pip install pytest
+            gstreamer1.0-pulseaudio \
+            python3-gi \
+            python3-gst-1.0
+          
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install -e .
 
       - name: Run tests
-        run: USE_REAL_CAMERA=false pytest tests/ -v
+        run: |
+          export PYTHONPATH=/usr/lib/python3/dist-packages:$PYTHONPATH
+          USE_REAL_CAMERA=false pytest tests/ -v
 
   build-and-publish:
     needs: test
@@ -79,6 +82,6 @@ jobs:
 
       - name: Publish to PyPI
         env:
-          TWINE_USERNAME: __token__DISABLED
+          TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: twine upload dist/*
