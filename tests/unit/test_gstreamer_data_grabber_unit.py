@@ -158,34 +158,6 @@ class TestVideoFormatConversions:
         assert result.dtype == np.uint16
         np.testing.assert_array_equal(result, bgr16_data)
     
-    @pytest.mark.skipif(True, reason="NV12 test requires full OpenCV installation")
-    def test_to_rgb_array_nv12_format(self):
-        """Test NV12 format conversion."""
-        try:
-            import cv2
-            # Verify cv2.cvtColor is available
-            if not hasattr(cv2, 'cvtColor'):
-                pytest.skip("OpenCV cvtColor not available")
-                
-            width, height = 320, 240
-            # NV12 format: Y plane (height x width) + UV plane (height/2 x width)
-            # Total size: height * width * 1.5 = 320 * 240 * 1.5 = 115200 bytes
-            nv12_size = int(height * width * 1.5)
-            # Create mock NV12 data - Y plane + interleaved UV plane
-            nv12_data = np.random.randint(0, 255, nv12_size, dtype=np.uint8)
-            mock_info = MockMapInfo(nv12_data.tobytes())
-            
-            result = _to_rgb_array(mock_info, width, height, "NV12")
-            
-            # Result should be RGB with shape (height, width, 3)
-            assert result.shape == (height, width, 3)
-            assert result.dtype == np.uint8
-            # Verify it's been converted through OpenCV
-            assert len(result.shape) == 3
-            assert result.shape[2] == 3  # RGB channels
-        except ImportError:
-            pytest.skip("OpenCV not available for NV12 testing")
-    
     def test_to_rgb_array_unsupported_format(self):
         """Test handling of unsupported pixel formats."""
         mock_info = MockMapInfo(b"dummy_data")

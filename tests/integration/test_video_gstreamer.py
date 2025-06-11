@@ -8,8 +8,6 @@ import queue
 import numpy as np
 import time
 
-# test_video_client_creation moved to tests/unit/test_client_creation.py
-
 @pytest.mark.requires_gstreamer
 def test_video_client_receives_frames(test_rtsp_url):
     """
@@ -83,4 +81,3 @@ def test_video_client_receives_frames(test_rtsp_url):
         thread.join(timeout=5)
         # Verify RTSP connection worked properly
         assert client.error_count == 0, f"RTSP connection should work without errors, got {client.error_count}"
-# test_video_client_invalid_rtsp_url moved to tests/unit/ - it's testing URL validation logic

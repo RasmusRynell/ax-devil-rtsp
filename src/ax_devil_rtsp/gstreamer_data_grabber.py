@@ -33,9 +33,6 @@ def _to_rgb_array(info: Gst.MapInfo, width: int, height: int, fmt: str) -> np.nd
         return np.frombuffer(data, np.uint8).reshape(height, width, 3)
     if fmt in ("RGB16", "BGR16"):
         return np.frombuffer(data, np.uint16).reshape(height, width)
-    if fmt == "NV12":
-        arr = np.frombuffer(data, np.uint8).reshape(int(height * 1.5), width)
-        return cv2.cvtColor(arr, cv2.COLOR_YUV2RGB_NV12)
     raise ValueError(f"Unsupported pixel format {fmt}")
 
 

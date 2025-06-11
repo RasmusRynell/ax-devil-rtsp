@@ -68,8 +68,7 @@ class TestParseMetadataXml:
         xml_data = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><test>\xff\xfe</test>"
 
         result = utils_module.parse_metadata_xml(xml_data)
-
-        assert result is None or result is not None
+        assert result is not None
 
 
 class TestParseSessionMetadata:
