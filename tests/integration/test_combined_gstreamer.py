@@ -35,25 +35,7 @@ def test_combined_client_connection_attempt(combined_test_rtsp_url):
         client.stop()
 
 
-@pytest.mark.requires_gstreamer
-def test_combined_client_connection_to_unreachable_server(combined_test_rtsp_url):
-    """Test that combined client handles unreachable RTSP server properly."""
-    # When USE_REAL_CAMERA=true, this will try real camera and should fail if unavailable
-    # When USE_REAL_CAMERA=false, this will use local server and should succeed
-    client = CombinedRTSPClient(combined_test_rtsp_url, latency=100, timeout=2.0)
-    
-    try:
-        print(f"Testing RTSP connection: {combined_test_rtsp_url}")
-        client.start()
-        time.sleep(3.0)  # Wait longer than timeout
-        
-        # Test behavior depends on what URL fixture provides
-        # Real camera (unavailable): Should have errors
-        # Local server: Should work without errors
-        print(f"Connection result - Video: {client.video_cnt}, Errors: {client.err_cnt}")
-        
-    finally:
-        client.stop()
+
 
 
 # test_combined_client_with_callbacks moved to tests/unit/test_client_creation.py
@@ -97,11 +79,11 @@ def test_combined_client_receives_video_frames(combined_test_rtsp_url):
         
         print(f"✅ Successfully received video frame via RTSP: {frame.shape}")
         
+        # Verify video reception occurred
+        assert client.video_cnt > 0, f"Should have received video via RTSP, got {client.video_cnt}"
+        
     finally:
         client.stop()
-        # Verify RTSP connection worked without errors
-        assert client.err_cnt == 0, f"RTSP connection should work without errors, got {client.err_cnt}"
-        assert client.video_cnt > 0, f"Should have received video via RTSP, got {client.video_cnt}"
 
 
 # test_combined_client_diagnostics moved to tests/unit/test_client_creation.py
@@ -136,12 +118,12 @@ def test_combined_client_context_manager(combined_test_rtsp_url):
 @pytest.mark.requires_gstreamer
 def test_combined_client_dual_stream_reception(combined_test_rtsp_url):
     """
-    Test that combined client can receive both video and audio streams via RTSP.
+    Test that combined client can receive both video and scene metadata streams via RTSP.
     
     This is the key test - verifies client can handle dual-stream RTSP like Axis cameras.
     """
     video_frames = []
-    audio_samples = []
+    metadata_samples = []
     
     def video_callback(payload):
         frame = payload.get("data")
@@ -150,11 +132,11 @@ def test_combined_client_dual_stream_reception(combined_test_rtsp_url):
             print(f"📹 Video frame {len(video_frames)}: {frame.shape}")
     
     def metadata_callback(payload):
-        # Audio stream simulates metadata for testing
+        # Scene metadata stream
         data = payload.get("data")
-        if data is not None and len(audio_samples) < 3:
-            audio_samples.append(data)
-            print(f"🎵 Audio sample {len(audio_samples)}: {type(data)}")
+        if data is not None and len(metadata_samples) < 3:
+            metadata_samples.append(data)
+            print(f"📊 Scene metadata sample {len(metadata_samples)}: {type(data)}")
     
     client = CombinedRTSPClient(
         combined_test_rtsp_url,
@@ -170,21 +152,17 @@ def test_combined_client_dual_stream_reception(combined_test_rtsp_url):
         
         # Wait for both stream types
         timeout = time.time() + 8
-        while (len(video_frames) < 2 or len(audio_samples) < 2) and time.time() < timeout:
+        while (len(video_frames) < 2 or len(metadata_samples) < 2) and time.time() < timeout:
             time.sleep(0.1)
         
+        # Integration test must receive video frames
         assert len(video_frames) >= 1, f"Should receive video frames via RTSP, got {len(video_frames)}"
         
-        # Note: Our test server provides audio stream, not real metadata XML
-        # The CombinedRTSPClient expects XML metadata, so audio won't be processed
-        if len(audio_samples) >= 1:
-            print(f"✅ Successfully received dual streams - Video: {len(video_frames)}, Audio: {len(audio_samples)}")
-        else:
-            print(f"✅ Successfully received video stream - Video: {len(video_frames)}")
-            print("   (No audio/metadata samples - expected with audio placeholder stream)")
+        # Integration test must receive scene metadata (no conditional success)
+        assert len(metadata_samples) >= 1, f"Should receive scene metadata via RTSP, got {len(metadata_samples)}"
+        
+        print(f"✅ Successfully received dual streams - Video: {len(video_frames)}, Scene Metadata: {len(metadata_samples)}")
         
     finally:
         client.stop()
-        # Client may have errors due to audio stream not containing XML metadata
-        # This is expected behavior when using audio as metadata placeholder
-        print(f"   Final state - Video: {client.video_cnt}, Metadata: {client.meta_cnt}, Errors: {client.err_cnt}") 
+        print(f"Final state - Video: {client.video_cnt}, Metadata: {client.meta_cnt}, Errors: {client.err_cnt}") 

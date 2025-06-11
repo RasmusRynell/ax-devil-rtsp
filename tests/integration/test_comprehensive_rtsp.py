@@ -5,7 +5,7 @@ Tests all deep RTSP functionality:
 1. Connection setup via real RTSP protocol
 2. Stream metadata reception and parsing  
 3. Video frame reception and decoding
-4. Analytics metadata reception
+4. Scene metadata reception
 5. All callback mechanisms
 """
 
@@ -213,13 +213,13 @@ def test_rtsp_video_frame_reception_deep(test_rtsp_url):
 
 
 @pytest.mark.requires_gstreamer
-def test_rtsp_analytics_metadata_reception(combined_test_rtsp_url):
+def test_rtsp_scene_metadata_reception(combined_test_rtsp_url):
     """
-    Test 4: Analytics Metadata Reception (Instead of Video)
+    Test 4: Scene Metadata Reception via RTSP
     
     Verifies:
-    - Metadata stream connection via RTSP
-    - Analytics data parsing
+    - Scene metadata stream connection via RTSP
+    - Metadata data parsing and reception
     - Metadata callback functionality  
     - Stream synchronization
     """
@@ -229,42 +229,40 @@ def test_rtsp_analytics_metadata_reception(combined_test_rtsp_url):
         data = payload.get("data")
         if data is not None:
             metadata_samples.append(data)
-            print(f"🎯 Analytics metadata {len(metadata_samples)}: {type(data)}, size={len(str(data)) if data else 0}")
+            print(f"📊 Scene metadata {len(metadata_samples)}: {type(data)}, size={len(str(data)) if data else 0}")
             
             # Deep metadata validation
             if isinstance(data, (str, bytes)):
-                assert len(str(data)) > 0, "Metadata should not be empty"
+                assert len(str(data)) > 0, "Scene metadata should not be empty"
             elif hasattr(data, 'shape'):  # numpy array
-                assert data.size > 0, "Metadata array should not be empty"
+                assert data.size > 0, "Scene metadata array should not be empty"
     
-    # Use CombinedRTSPClient but focus only on metadata stream
+    # Use CombinedRTSPClient to receive scene metadata stream
     client = CombinedRTSPClient(
         combined_test_rtsp_url,
         latency=100,
         metadata_callback=metadata_callback,
-        video_frame_callback=None,  # Focus on metadata only
+        video_frame_callback=None,  # Focus on scene metadata only
         timeout=6.0
     )
     
     try:
-        print(f"🎯 Testing analytics metadata reception: {combined_test_rtsp_url}")
+        print(f"📊 Testing scene metadata reception: {combined_test_rtsp_url}")
         client.start()
         
-        # Wait for metadata samples
+        # Wait for scene metadata samples
         timeout = time.time() + 5
         while len(metadata_samples) < 2 and time.time() < timeout:
             time.sleep(0.1)
             
-        # Note: With our test server using audio as metadata simulation,
-        # we may not get traditional metadata but should get the second stream
-        if len(metadata_samples) > 0:
-            print(f"✅ Analytics metadata reception successful - {len(metadata_samples)} samples")
-            
-            # Validate metadata consistency
-            for i, sample in enumerate(metadata_samples):
-                assert sample is not None, f"Metadata sample {i} should not be None"
-        else:
-            print("ℹ️  No metadata received - test server may only provide video stream")
+        # Integration test must receive scene metadata
+        assert len(metadata_samples) >= 1, f"Should receive scene metadata via RTSP, got {len(metadata_samples)}"
+        
+        print(f"✅ Scene metadata reception successful - {len(metadata_samples)} samples")
+        
+        # Validate scene metadata consistency
+        for i, sample in enumerate(metadata_samples):
+            assert sample is not None, f"Scene metadata sample {i} should not be None"
             
     finally:
         client.stop()
@@ -277,7 +275,7 @@ def test_all_rtsp_callbacks_comprehensive(combined_test_rtsp_url):
     
     Verifies:
     - Video frame callback
-    - Metadata callback  
+    - Scene metadata callback  
     - Session metadata callback
     - Error callback
     - Callback parameter validation
@@ -301,11 +299,11 @@ def test_all_rtsp_callbacks_comprehensive(combined_test_rtsp_url):
     def metadata_callback(payload):
         metadata_callbacks.append(payload)
         data = payload.get("data")
-        print(f"🎯 Metadata callback {len(metadata_callbacks)}: {type(data)}")
+        print(f"📊 Scene metadata callback {len(metadata_callbacks)}: {type(data)}")
         
         # Validate callback payload structure  
-        assert isinstance(payload, dict), f"Metadata payload should be dict, got {type(payload)}"
-        assert "data" in payload, "Metadata payload should contain 'data' key"
+        assert isinstance(payload, dict), f"Scene metadata payload should be dict, got {type(payload)}"
+        assert "data" in payload, "Scene metadata payload should contain 'data' key"
         
     def session_callback(payload):
         session_callbacks.append(payload)
@@ -338,14 +336,13 @@ def test_all_rtsp_callbacks_comprehensive(combined_test_rtsp_url):
         # Allow time for various callbacks to trigger
         time.sleep(4.0)
         
-        # Verify callback execution
+        # Integration test requires video callbacks
         assert len(video_callbacks) > 0, f"Should trigger video callbacks, got {len(video_callbacks)}"
         print(f"✅ Video callbacks: {len(video_callbacks)}")
         
-        if len(metadata_callbacks) > 0:
-            print(f"✅ Metadata callbacks: {len(metadata_callbacks)}")
-        else:
-            print("ℹ️  No metadata callbacks - may depend on server capabilities")
+        # Integration test requires scene metadata callbacks
+        assert len(metadata_callbacks) > 0, f"Should trigger scene metadata callbacks, got {len(metadata_callbacks)}"
+        print(f"✅ Scene metadata callbacks: {len(metadata_callbacks)}")
             
         if len(session_callbacks) > 0:
             print(f"✅ Session callbacks: {len(session_callbacks)}")
@@ -359,6 +356,9 @@ def test_all_rtsp_callbacks_comprehensive(combined_test_rtsp_url):
             frame = payload["data"]
             if frame is not None:
                 assert hasattr(frame, 'shape'), f"Video callback {i} data should be array-like"
+                
+        for i, payload in enumerate(metadata_callbacks):
+            assert "data" in payload, f"Scene metadata callback {i} missing data key"
                 
         print(f"✅ All callback mechanisms validated")
         
