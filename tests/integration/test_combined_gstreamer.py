@@ -4,6 +4,7 @@ import threading
 import queue
 
 pytest.importorskip("gi")
+pytest.importorskip("numpy")
 from ax_devil_rtsp.gstreamer_data_grabber import CombinedRTSPClient
 
 
@@ -13,29 +14,22 @@ from ax_devil_rtsp.gstreamer_data_grabber import CombinedRTSPClient
 @pytest.mark.requires_gstreamer
 def test_combined_client_connection_attempt(combined_test_rtsp_url):
     """
-    Test that combined client can connect to RTSP server via actual RTSP protocol.
+    Test that combined client successfully connects to the provided RTSP URL.
     
-    This test verifies:
-    1. Client connects to RTSP server over network
-    2. Client receives video stream via RTSP protocol
-    3. Client receives second stream (audio simulating metadata)
-    4. NO CHEATING - real RTSP protocol communication required
+    This test REQUIRES actual connectivity:
+    - If URL is reachable: Should successfully connect and receive video data
+    - If URL is unreachable: SHOULD FAIL (this is integration testing)
     """
-    client = CombinedRTSPClient(combined_test_rtsp_url, latency=100, timeout=5.0)
+    client = CombinedRTSPClient(combined_test_rtsp_url, latency=100, timeout=8.0)
     
     try:
-        print(f"Connecting to RTSP server: {combined_test_rtsp_url}")
+        print(f"Testing RTSP connection to: {combined_test_rtsp_url}")
         client.start()
-        time.sleep(6.0)  # Allow time for RTSP connection and stream reception
+        time.sleep(10.0)  # Allow time for connection establishment and data reception
         
-        # With our test server providing audio instead of real metadata,
-        # the client should connect and receive video, but may timeout waiting for metadata
-        assert client.video_cnt > 0, f"Should have received video frames via RTSP, got {client.video_cnt}"
-        
-        # Note: Client may have errors due to audio stream not being proper metadata XML
-        # This is expected behavior - we're testing RTSP connection capability
-        print(f"✅ RTSP Connection test - Video: {client.video_cnt}, Errors: {client.err_cnt}")
-        print("   (Error count may be > 0 due to audio stream not being real metadata XML)")
+        # Integration test REQUIRES successful connection AND data reception
+        assert client.video_cnt > 0, f"Failed to receive video from {combined_test_rtsp_url}, got {client.video_cnt} frames"
+        print(f"✅ Successfully connected and received {client.video_cnt} video frames from: {combined_test_rtsp_url}")
         
     finally:
         client.stop()

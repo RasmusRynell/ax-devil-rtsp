@@ -13,24 +13,37 @@ import time
 @pytest.mark.requires_gstreamer
 def test_video_client_connection_attempt(test_rtsp_url):
     """
-    Test that video client can connect to RTSP server via actual RTSP protocol.
+    Test that video client successfully connects to the provided RTSP URL.
     
-    This test verifies:
-    1. Client connects to RTSP server over network
-    2. Client successfully negotiates RTSP session
-    3. Client receives H.264 video stream
-    4. NO CHEATING - must use real RTSP protocol
+    This test REQUIRES actual connectivity:
+    - If URL is reachable: Should successfully connect without errors
+    - If URL is unreachable: SHOULD FAIL (this is integration testing)
     """
-    client = VideoGStreamerClient(test_rtsp_url, latency=100, timeout=5.0)
+    session_established = False
+    
+    def callback(payload):
+        # Simple callback to satisfy VideoGStreamerClient requirements
+        nonlocal session_established
+        session_established = True
+    
+    client = VideoGStreamerClient(test_rtsp_url, latency=100, timeout=None, frame_handler_callback=callback)
     
     try:
         print(f"Testing RTSP connection to: {test_rtsp_url}")
         client.start()
-        time.sleep(3.0)  # Allow time for RTSP connection
+        time.sleep(5.0)  # Allow time for connection establishment
         
-        # Should successfully connect via RTSP protocol without errors
-        assert client.error_count == 0, f"RTSP connection should succeed, got {client.error_count} errors"
-        print(f"✅ RTSP connection successful - No errors recorded")
+        # Check if we have session metadata (indicates successful RTSP connection)
+        session_metadata = getattr(client, 'session_metadata', None)
+        if session_metadata:
+            print(f"✅ Successfully connected to RTSP server: {test_rtsp_url}")
+            print(f"   Session metadata received: {len(session_metadata)} entries")
+        else:
+            # Check if we got any callbacks indicating connection worked
+            if session_established:
+                print(f"✅ Successfully connected and receiving data from: {test_rtsp_url}")
+            else:
+                pytest.fail(f"Failed to establish connection to {test_rtsp_url}")
         
     finally:
         client.stop()

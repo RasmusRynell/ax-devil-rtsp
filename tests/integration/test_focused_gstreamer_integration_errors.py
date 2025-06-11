@@ -161,23 +161,33 @@ def test_error_callback_triggered():
 
 @pytest.mark.requires_gstreamer
 def test_definite_connection_failure():
-    """Test guaranteed connection failure scenario with unreachable server."""
-    # Use RFC5737 test network address that is guaranteed to be unreachable
-    unreachable_url = "rtsp://192.0.2.1:554/guaranteed-failure"
+    """Test that client properly handles definitely unreachable RTSP server using RFC5737 test IP."""
+    # RFC5737 reserved IP address that is guaranteed to be unreachable
+    unreachable_url = "rtsp://192.0.2.1/axis-media/media.amp"
     
-    client = CombinedRTSPClient(unreachable_url, timeout=3.0)
+    error_reports = []
+    
+    def error_callback(payload):
+        error_reports.append(payload)
+        print(f"💥 Error reported: {payload}")
+    
+    client = CombinedRTSPClient(
+        unreachable_url,
+        error_callback=error_callback,
+        timeout=3.0
+    )
     
     thread = threading.Thread(target=client.start, daemon=True)
     thread.start()
     
     try:
-        time.sleep(4.0)  # Wait for connection attempt to fail
+        time.sleep(5.0)  # Wait for connection timeout
         
-        # This URL is guaranteed to be unreachable, so should definitely fail
-        assert client.video_cnt == 0, f"Unreachable server should not provide video frames, got {client.video_cnt}"
-        assert client.err_cnt > 0, f"Unreachable server should cause errors, got {client.err_cnt}"
+        # Should definitely fail to connect to RFC5737 test address
+        assert client.err_cnt > 0, f"Unreachable IP should generate errors, got {client.err_cnt}"
+        assert client.video_cnt == 0, f"Unreachable IP should not receive video, got {client.video_cnt}"
         
-        print(f"✅ Guaranteed failure test - Video: {client.video_cnt}, Errors: {client.err_cnt}")
+        print(f"✅ Properly detected unreachable server - Errors: {client.err_cnt}, Video: {client.video_cnt}")
         
     finally:
         client.stop()

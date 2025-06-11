@@ -46,7 +46,6 @@ def rtsp_test_server():
     3. Serves H.264 video stream like Axis camera
     4. Requires clients to authenticate and connect properly
     
-    NO CHEATING - clients must do real RTSP protocol communication.
     """
     try:
         import gi
@@ -203,4 +202,4 @@ def combined_test_rtsp_url(axis_metadata_rtsp_server, rtsp_credentials):
         return real_url
     else:
         print(f"\n🎬 DUAL-STREAM TEST SERVER: {axis_metadata_rtsp_server}")
-        return axis_metadata_rtsp_server
+        return axis_metadata_rtsp_server 

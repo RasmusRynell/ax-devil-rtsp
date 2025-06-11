@@ -7,8 +7,6 @@ Tests all deep RTSP functionality:
 3. Video frame reception and decoding
 4. Analytics metadata reception
 5. All callback mechanisms
-
-NO CHEATING - all tests use real RTSP protocol communication.
 """
 
 import pytest
