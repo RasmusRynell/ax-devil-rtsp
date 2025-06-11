@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.10', '3.11']
+        python-version: [ '3.10', '3.11' ]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -22,43 +22,44 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      # Re‑use wheels between workflow runs to avoid rebuilding PyGObject each time
+      - name: Cache pip wheels
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-${{ matrix.python-version }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.python-version }}-pip-
+
+      - name: Install system libraries (headers + GStreamer)
         run: |
-          python -m pip install --upgrade pip
           sudo apt-get update
           sudo apt-get install -y \
-            python3-gi \
-            python3-gst-1.0 \
-            libcairo2-dev \
             libgirepository1.0-dev \
+            libcairo2-dev \
             pkg-config \
-            libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libgstreamer-plugins-bad1.0-dev \
+            gcc \
+            gstreamer1.0-dev \
             gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good \
             gstreamer1.0-plugins-bad \
             gstreamer1.0-plugins-ugly \
             gstreamer1.0-libav \
-            gstreamer1.0-tools \
-            gstreamer1.0-x \
-            gstreamer1.0-alsa \
-            gstreamer1.0-gl \
-            gstreamer1.0-gtk3 \
-            gstreamer1.0-qt5 \
-            gstreamer1.0-pulseaudio \
-            gstreamer1.0-rtsp
-          
-          echo "PYTHONPATH=/usr/lib/python3/dist-packages:$PYTHONPATH" >> $GITHUB_ENV
+            gstreamer1.0-tools
 
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+      - name: Build PyGObject and project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Build the bindings for the *current* interpreter
+          pip install pycairo
+          pip install PyGObject
+          # Project‑specific dependencies
+          if [ -f requirements.txt ];      then pip install -r requirements.txt      ; fi
+          if [ -f requirements-dev.txt ];  then pip install -r requirements-dev.txt  ; fi
           pip install -e .
 
       - name: Run tests
-        run: |
-          export PYTHONPATH=/usr/lib/python3/dist-packages:$PYTHONPATH
-          USE_REAL_CAMERA=false pytest tests/ -v
+        run: USE_REAL_CAMERA=false pytest tests/ -v
 
   build-and-publish:
     needs: test
@@ -73,9 +74,34 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Cache pip wheels
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-3.11-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-3.11-pip-
+
+      - name: Install system libraries (headers + GStreamer)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgirepository1.0-dev \
+            libcairo2-dev \
+            pkg-config \
+            gcc \
+            gstreamer1.0-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            gstreamer1.0-tools
+
+      - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install pycairo PyGObject
           pip install build twine
 
       - name: Build and check package
