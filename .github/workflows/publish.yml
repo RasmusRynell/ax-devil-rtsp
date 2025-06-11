@@ -12,7 +12,7 @@ jobs:
   # Test matrix (build PyGObject for the active interpreter in each job)
   ###########################################################################
   test:
-    runs-on: ubuntu-24.04            # the 24.04 runner ships Python 3.12 & GCC 13
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         python-version: [ '3.10', '3.11' ]
@@ -25,7 +25,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # Re-use wheels between runs so PyGObject isn’t rebuilt every time
       - name: Cache pip wheels
         uses: actions/cache@v4
         with:
@@ -34,25 +33,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.python-version }}-pip-
 
-      - name: Install system libraries (headers only)
+      - name: Install system libraries (headers + GStreamer)
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            # Introspection & Cairo headers needed to *build* PyGObject
-            gobject-introspection libgirepository-2.0-dev libcairo2-dev pkg-config gcc \
-            # GStreamer core + common plugin bundles (runtime)
-            gstreamer1.0-dev \
-            gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-            gstreamer1.0-plugins-bad  gstreamer1.0-plugins-ugly \
-            gstreamer1.0-libav gstreamer1.0-tools
+          sudo apt-get install -y gobject-introspection libgirepository-2.0-dev libcairo2-dev pkg-config gcc \
+                                gstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+                                gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools
 
       - name: Build PyGObject and project dependencies
         run: |
           python -m pip install --upgrade pip
-          # Build the GI bindings for the *current* interpreter
-          pip install pycairo                           # first: cairo layer
-          pip install PyGObject                         # then: gi/_gi
-          # Project-specific requirements (if present)
+          pip install pycairo PyGObject
           if [ -f requirements.txt ];      then pip install -r requirements.txt      ; fi
           if [ -f requirements-dev.txt ];  then pip install -r requirements-dev.txt  ; fi
           pip install -e .
@@ -61,7 +52,7 @@ jobs:
         run: USE_REAL_CAMERA=false pytest tests/ -v
 
   ###########################################################################
-  # Build and publish to PyPI on version tags (re-use the same recipe)
+  # Build and publish to PyPI on version tags
   ###########################################################################
   build-and-publish:
     needs: test
@@ -76,7 +67,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Cache pip wheels (build job)
+      - name: Cache pip wheels
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
@@ -84,12 +75,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-3.11-pip-
 
-      - name: Install system libraries (headers only)
+      - name: Install system libraries (headers + GStreamer)
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            gobject-introspection libgirepository-2.0-dev libcairo2-dev pkg-config gcc \
-            gstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-tools
+          sudo apt-get install -y gobject-introspection libgirepository-2.0-dev libcairo2-dev pkg-config gcc \
+                                gstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-tools
 
       - name: Install build dependencies
         run: |
