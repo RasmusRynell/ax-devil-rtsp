@@ -148,13 +148,51 @@ ax-devil-rtsp metadata --ip 192.168.1.90 --username admin --password secret
 
 ## 🧪 Running Tests
 
-The project uses `pytest`. GStreamer tests start a local `gst-rtsp-server`
-streaming a test pattern so no physical camera is required. Make sure
-GStreamer and `gst-rtsp-server` are installed and run:
-
+#### Unit Tests
 ```bash
+# Run all unit tests - no network dependencies
+pytest tests/unit/ -v
+
+# Run specific unit test file
+pytest tests/unit/test_cli.py -v
+```
+
+#### Integration Tests  
+```bash
+# Local development mode (uses GStreamer test servers)
+pytest tests/integration/ -v
+
+# Real camera mode (uses actual hardware)
+USE_REAL_CAMERA=true \
+AX_DEVIL_TARGET_ADDR=192.168.1.81 \
+AX_DEVIL_TARGET_USER=root \
+AX_DEVIL_TARGET_PASS=fusion \
+pytest tests/integration/ -v
+
+# Run specific integration test file
+pytest tests/integration/test_video_gstreamer.py -v
+```
+
+#### All Tests
+```bash
+# Local mode (unit + integration with test servers)
+pytest tests/ -v
+
+# Real camera mode (unit + integration with real camera)
+USE_REAL_CAMERA=true pytest tests/ -v
+
+# GStreamer tests only
 pytest -m "requires_gstreamer" -v
 ```
+
+### Test Environment Variables
+
+- **`USE_REAL_CAMERA`**: `true` to use real cameras, `false` for test servers
+- **`AX_DEVIL_TARGET_ADDR`**: Real camera IP address
+- **`AX_DEVIL_TARGET_USER`**: Camera username  
+- **`AX_DEVIL_TARGET_PASS`**: Camera password
+
+> **Note:** Integration tests fail naturally if they cannot connect to the provided RTSP URL, regardless of whether it's a test server or real camera.
 
 
 > **Note:** For more CLI examples and detailed API documentation, check the [examples directory](src/ax_devil_rtsp/examples) in the source code.

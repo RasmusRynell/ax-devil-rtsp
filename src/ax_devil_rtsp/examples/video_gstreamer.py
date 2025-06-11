@@ -1,5 +1,6 @@
 import logging
 import time
+import threading
 from datetime import datetime, timezone
 from typing import Callable, Optional, Dict, Any
 import multiprocessing
@@ -30,6 +31,7 @@ class VideoGStreamerClient:
         session_metadata_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
         shared_config: Optional[dict] = None,
+        timeout: Optional[float] = None,
     ) -> None:
         """
         Initialize the VideoGStreamerClient.
@@ -47,6 +49,7 @@ class VideoGStreamerClient:
                   or {"sdes": { ... }}
         :param processing_fn: A function that processes each frame using shared_config.
         :param shared_config: A dict for runtime-updatable configuration.
+        :param timeout: Optional timeout in seconds to automatically stop the client.
         """
         self.rtsp_url = rtsp_url
         self.latency = latency
@@ -54,12 +57,17 @@ class VideoGStreamerClient:
         self.session_metadata_callback = session_metadata_callback
         self.processing_fn = processing_fn
         self.shared_config = shared_config if shared_config is not None else {}
+        self.timeout = timeout
 
         # Diagnostics and state.
         self.sample_count: int = 0
         self.error_count: int = 0
         self.start_time: Optional[float] = None
         self.latest_rtp_data: Optional[Dict[str, Any]] = None
+
+        # Thread control
+        self._loop_thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
 
         # Initialize GStreamer.
         Gst.init(None)
@@ -94,6 +102,7 @@ class VideoGStreamerClient:
         self.src.set_property("location", self.rtsp_url)
         self.src.set_property("latency", self.latency)
         self.src.set_property("protocols", "tcp")
+        self.src.set_property("tcp-timeout", 100_000_000)
         self.src.connect("pad-added", self._on_pad_added)
         self.src.connect("notify::sdes", self._on_sdes_notify)
 
@@ -410,30 +419,69 @@ class VideoGStreamerClient:
             self.error_count += 1
             self.stop()
 
-    def start(self) -> None:
-        """
-        Start the GStreamer pipeline and run the main loop.
-        """
-        logger.info("Starting VideoGStreamerClient pipeline.")
-        self.start_time = time.time()
-        ret = self.pipeline.set_state(Gst.State.PLAYING)
-        if ret == Gst.StateChangeReturn.FAILURE:
-            logger.error("Failed to set pipeline to PLAYING state.")
-            raise RuntimeError("Pipeline failed to start.")
+    def _run_loop(self) -> None:
+        """Run the GStreamer main loop in a separate thread."""
         try:
             self.loop.run()
         except Exception as e:
             logger.error("Main loop encountered an error: %s", e)
+        finally:
+            logger.debug("GStreamer main loop exited")
+
+    def _timeout_handler(self) -> None:
+        """Handle timeout by stopping the client."""
+        if not self._stop_event.is_set():
+            logger.warning(f"Timeout reached ({self.timeout}s), stopping client")
+            self.error_count += 1
             self.stop()
+
+    def start(self) -> None:
+        """
+        Start the GStreamer pipeline and run the main loop in a separate thread.
+        """
+        logger.info("Starting VideoGStreamerClient pipeline.")
+        self.start_time = time.time()
+        
+        # Start pipeline
+        ret = self.pipeline.set_state(Gst.State.PLAYING)
+        if ret == Gst.StateChangeReturn.FAILURE:
+            logger.error("Failed to set pipeline to PLAYING state.")
+            raise RuntimeError("Pipeline failed to start.")
+        
+        # Start main loop in separate thread
+        self._stop_event.clear()
+        self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._loop_thread.start()
+        
+        # Handle timeout if specified
+        if self.timeout:
+            timer = threading.Timer(self.timeout, self._timeout_handler)
+            timer.daemon = True
+            timer.start()
 
     def stop(self) -> None:
         """
         Stop the GStreamer pipeline and quit the main loop.
         """
+        if self._stop_event.is_set():
+            return  # Already stopping
+            
         logger.info("Stopping VideoGStreamerClient pipeline.")
+        self._stop_event.set()
+        
+        # Stop pipeline
         self.pipeline.set_state(Gst.State.NULL)
+        
+        # Quit main loop
         if self.loop.is_running():
             self.loop.quit()
+        
+        # Wait for loop thread to finish
+        if self._loop_thread and self._loop_thread.is_alive():
+            self._loop_thread.join(timeout=1.0)
+            if self._loop_thread.is_alive():
+                logger.warning("Main loop thread did not exit cleanly")
+        
         logger.info("Pipeline stopped.")
 
     def get_diagnostics(self) -> Dict[str, Any]:

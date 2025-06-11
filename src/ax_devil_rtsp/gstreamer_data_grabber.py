@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import multiprocessing as mp
 import time
+import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
@@ -14,6 +15,7 @@ from .utils import parse_session_metadata
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GstRtp", "1.0")
+gi.require_version("GstRtsp", "1.0")
 from gi.repository import Gst, GstRtp, GLib, GstRtsp
 
 logger = logging.getLogger("ax-devil-rtsp.CombinedRTSPClient")
@@ -51,6 +53,7 @@ class CombinedRTSPClient:
         error_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         video_processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
         shared_config: Optional[dict] = None,
+        timeout: Optional[float] = None,
     ) -> None:
         self.rtsp_url = rtsp_url
         self.latency = latency
@@ -60,6 +63,11 @@ class CombinedRTSPClient:
         self.error_cb = error_callback
         self.video_proc_fn = video_processing_fn
         self.shared_cfg = shared_config or {}
+        self.timeout = timeout
+
+        # Thread control
+        self._loop_thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
 
         # Diagnostic counters and state
         self.start_time: Optional[float] = None
@@ -182,6 +190,8 @@ class CombinedRTSPClient:
         elif msg.type == Gst.MessageType.ERROR:
             err, dbg = msg.parse_error()
             self._report_error("GStreamer Error", f"{err.message} | {dbg}")
+            # Stop on error to prevent hanging
+            self.stop()
 
     def _on_pad_added(self, _src: Gst.Element, pad: Gst.Pad) -> None:
         caps = pad.get_current_caps()
@@ -398,24 +408,63 @@ class CombinedRTSPClient:
             except Exception as cb_error:
                 logger.error("Error callback failed: %s", cb_error)
 
-    def start(self) -> None:
-        """Start the GStreamer pipeline and main loop."""
-        logger.info("Starting CombinedRTSPClient")
-        self.start_time = time.time()
-        if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
-            raise RuntimeError("Unable to set pipeline to PLAYING state")
+    def _run_loop(self) -> None:
+        """Run the GStreamer main loop in a separate thread."""
         try:
             self.loop.run()
         except Exception as e:
             self._report_error("Main Loop", f"Main loop error: {e}", e)
+        finally:
+            logger.debug("GStreamer main loop exited")
+
+    def start(self) -> None:
+        """Start the GStreamer pipeline and main loop in a separate thread."""
+        logger.info("Starting CombinedRTSPClient")
+        self.start_time = time.time()
+        
+        # Start pipeline
+        state_ret = self.pipeline.set_state(Gst.State.PLAYING)
+        if state_ret == Gst.StateChangeReturn.FAILURE:
+            raise RuntimeError("Unable to set pipeline to PLAYING state")
+        
+        # Start main loop in separate thread
+        self._stop_event.clear()
+        self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._loop_thread.start()
+        
+        # Handle timeout if specified
+        if self.timeout:
+            timer = threading.Timer(self.timeout, self._timeout_handler)
+            timer.daemon = True
+            timer.start()
+
+    def _timeout_handler(self) -> None:
+        """Handle timeout by stopping the client."""
+        if not self._stop_event.is_set():
+            logger.warning(f"Timeout reached ({self.timeout}s), stopping client")
+            self._report_error("Timeout", f"Client timed out after {self.timeout} seconds")
             self.stop()
 
     def stop(self) -> None:
         """Stop the GStreamer pipeline and quit the loop."""
+        if self._stop_event.is_set():
+            return  # Already stopping
+            
         logger.info("Stopping CombinedRTSPClient")
+        self._stop_event.set()
+        
+        # Stop pipeline
         self.pipeline.set_state(Gst.State.NULL)
+        
+        # Quit main loop
         if self.loop.is_running():
             self.loop.quit()
+        
+        # Wait for loop thread to finish
+        if self._loop_thread and self._loop_thread.is_alive():
+            self._loop_thread.join(timeout=1.0)
+            if self._loop_thread.is_alive():
+                logger.warning("Main loop thread did not exit cleanly")
 
     def __enter__(self) -> CombinedRTSPClient:
         self.start()
@@ -432,6 +481,7 @@ def run_combined_client_simple_example(
     queue: Optional[mp.Queue] = None,
     video_processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
     shared_config: Optional[dict] = None,
+    timeout: Optional[float] = 30.0,
 ) -> None:
     """Example runner: spawns client and logs or queues payloads."""
     def vid_cb(pl: dict) -> None:
@@ -464,6 +514,7 @@ def run_combined_client_simple_example(
         error_callback=err_cb,
         video_processing_fn=video_processing_fn,
         shared_config=shared_config or {},
+        timeout=timeout,
     )
     client.start()
 
