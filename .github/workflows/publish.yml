@@ -47,9 +47,10 @@ jobs:
             gstreamer1.0-gtk3 \
             gstreamer1.0-qt5 \
             gstreamer1.0-pulseaudio \
+            gstreamer1.0-rtsp
           
           echo "PYTHONPATH=/usr/lib/python3/dist-packages:$PYTHONPATH" >> $GITHUB_ENV
-          
+
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install -e .
