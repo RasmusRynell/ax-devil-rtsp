@@ -44,7 +44,9 @@ jobs:
             gstreamer1.0-gl \
             gstreamer1.0-gtk3 \
             gstreamer1.0-qt5 \
-            gstreamer1.0-pulseaudio
+            gstreamer1.0-pulseaudio \
+            python3-gi \
+            python3-gst-1.0
           
           pip install pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
@@ -79,6 +81,6 @@ jobs:
 
       - name: Publish to PyPI
         env:
-          TWINE_USERNAME: __token__DISABLED
+          TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: twine upload dist/*

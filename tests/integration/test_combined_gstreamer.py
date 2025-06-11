@@ -4,7 +4,6 @@ import threading
 import queue
 
 pytest.importorskip("gi")
-pytest.importorskip("numpy")
 from ax_devil_rtsp.gstreamer_data_grabber import CombinedRTSPClient
 
 
