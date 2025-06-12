@@ -150,6 +150,9 @@ def main():
         proc.join()
         cv2.destroyAllWindows()
 
+def cli() -> None:
+    """Console-script entry point."""
+    main()
 
 if __name__ == "__main__":
-    main()
+    cli()
