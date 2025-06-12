@@ -441,9 +441,13 @@ class CombinedRTSPClient:
     def _timeout_handler(self) -> None:
         """Handle timeout by stopping the client."""
         if not self._stop_event.is_set():
-            logger.warning(f"Timeout reached ({self.timeout}s), stopping client")
-            self._report_error("Timeout", f"Client timed out after {self.timeout} seconds")
-            self.stop()
+            logger.warning(
+                "Timeout reached (%ss), stopping client", self.timeout
+            )
+            self._report_error(
+                "Timeout", f"Client timed out after {self.timeout} seconds"
+            )
+            GLib.idle_add(self.stop)
 
     def stop(self) -> None:
         """Stop the GStreamer pipeline and quit the loop."""
@@ -463,7 +467,7 @@ class CombinedRTSPClient:
         
         # Quit main loop
         if self.loop.is_running():
-            self.loop.quit()
+            GLib.idle_add(self.loop.quit)
         
         # Wait for loop thread to finish
         if self._loop_thread and self._loop_thread.is_alive():

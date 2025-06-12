@@ -419,9 +419,11 @@ class VideoGStreamerClient:
     def _timeout_handler(self) -> None:
         """Handle timeout by stopping the client."""
         if not self._stop_event.is_set():
-            logger.warning(f"Timeout reached ({self.timeout}s), stopping client")
+            logger.warning(
+                "Timeout reached (%ss), stopping client", self.timeout
+            )
             self.error_count += 1
-            self.stop()
+            GLib.idle_add(self.stop)
 
     def start(self) -> None:
         """
@@ -462,7 +464,7 @@ class VideoGStreamerClient:
         
         # Quit main loop
         if self.loop.is_running():
-            self.loop.quit()
+            GLib.idle_add(self.loop.quit)
         
         # Wait for loop thread to finish
         if self._loop_thread and self._loop_thread.is_alive():

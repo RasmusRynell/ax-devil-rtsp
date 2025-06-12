@@ -67,6 +67,10 @@ def client_runner(
     latency: int,
     queue: mp.Queue,
 ) -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s",
+    )
     def video_cb(pl: dict):
         queue.put({"kind": "video", **pl})
 
