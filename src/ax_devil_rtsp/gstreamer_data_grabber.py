@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Optional
 import cv2
 import gi
 import numpy as np
+import sys
 
 from .utils import parse_session_metadata
 
@@ -17,6 +18,14 @@ gi.require_version("Gst", "1.0")
 gi.require_version("GstRtp", "1.0")
 gi.require_version("GstRtsp", "1.0")
 from gi.repository import Gst, GstRtp, GLib, GstRtsp
+
+# Ensure subprocess logging is visible
+if __name__ == "__main__" or not logging.getLogger().hasHandlers():
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        stream=sys.stdout
+    )
 
 logger = logging.getLogger("ax-devil-rtsp.CombinedRTSPClient")
 
@@ -87,14 +96,16 @@ class CombinedRTSPClient:
         self._timer: Optional[None | threading.Timer] = None
 
     def _setup_elements(self) -> None:
-        """Build video and metadata branches of the pipeline."""
+        logger.debug("Setting up pipeline elements")
         self._create_rtspsrc()
         self._create_video_branch()
         self.meta_branch_built = False
 
     def _create_rtspsrc(self) -> None:
+        logger.debug("Creating rtspsrc element")
         src = Gst.ElementFactory.make("rtspsrc", "src")
         if not src:
+            logger.error("Unable to create rtspsrc element")
             raise RuntimeError("Unable to create rtspsrc element")
         src.props.location = self.rtsp_url
         src.props.latency = self.latency
@@ -111,9 +122,11 @@ class CombinedRTSPClient:
         src.connect("notify::sdes", self._on_sdes_notify)
         self.pipeline.add(src)
         self.src = src
+        logger.debug("rtspsrc element created and added to pipeline")
 
     def _create_video_branch(self) -> None:
         """Add and link video depay, parser, decoder, converter, and appsink."""
+        logger.debug("Creating video branch elements")
         elems = {
             'v_depay': Gst.ElementFactory.make("rtph264depay", "v_depay"),
             'v_parse': Gst.ElementFactory.make("h264parse", "v_parse"),
@@ -142,12 +155,14 @@ class CombinedRTSPClient:
         pad = elems['v_depay'].get_static_pad('sink')
         pad.add_probe(Gst.PadProbeType.BUFFER, self._rtp_probe)
         self.v_depay = elems['v_depay']
+        logger.debug("Video branch elements created and linked")
 
     def _ensure_meta_branch(self) -> None:
         """Lazily build metadata branch on demand."""
         if self.meta_branch_built:
             return
 
+        logger.debug("Creating metadata branch elements")
         m_jit = Gst.ElementFactory.make("rtpjitterbuffer", "m_jit")
         m_caps = Gst.ElementFactory.make("capsfilter", "m_caps")
         m_sink = Gst.ElementFactory.make("appsink", "m_sink")
@@ -188,6 +203,7 @@ class CombinedRTSPClient:
 
     def _on_pad_added(self, _src: Gst.Element, pad: Gst.Pad) -> None:
         caps = pad.get_current_caps()
+        logger.debug(f"Pad added: {pad.get_name()}, caps: {caps.to_string() if caps else 'None'}")
         if not caps:
             return
         struct = caps.get_structure(0)
@@ -261,6 +277,7 @@ class CombinedRTSPClient:
         return Gst.PadProbeReturn.OK
 
     def _on_new_video_sample(self, sink: Gst.Element) -> Gst.FlowReturn:
+        logger.debug("Received new video sample")
         self._timers['vid_sample'] = time.time()
         sample = sink.emit('pull-sample')
         if not sample:
@@ -301,6 +318,7 @@ class CombinedRTSPClient:
             'diagnostics': self._video_diag()
         }
         if self.video_frame_cb:
+            logger.debug(f"Calling video_frame_cb (count={self.video_cnt})")
             start = time.time()
             try:
                 self.video_frame_cb(payload)
@@ -311,6 +329,7 @@ class CombinedRTSPClient:
         return Gst.FlowReturn.OK
 
     def _on_new_meta_sample(self, sink: Gst.Element) -> Gst.FlowReturn:
+        logger.debug("Received new metadata sample")
         sample = sink.emit('pull-sample')
         if not sample:
             self._report_error("Metadata Sample", "No sample received from metadata sink")
@@ -360,6 +379,7 @@ class CombinedRTSPClient:
         self._xml_acc = b""
         payload = {'data': xml, 'diagnostics': self._meta_diag()}
         if self.metadata_cb:
+            logger.debug(f"Calling metadata_cb (count={self.meta_cnt})")
             try:
                 self.metadata_cb(payload)
             except Exception as e:
@@ -388,7 +408,7 @@ class CombinedRTSPClient:
     def _report_error(self, error_type: str, message: str, exception: Optional[Exception] = None) -> None:
         """Report an error through logging, counting, and callback."""
         self.err_cnt += 1
-        logger.debug(f"gstreamer_data_grabber got error: {error_type}: {message}")
+        logger.error(f"gstreamer_data_grabber got error: {error_type}: {message}")
         
         if self.error_cb:
             error_payload = {
@@ -414,22 +434,30 @@ class CombinedRTSPClient:
         """Start the GStreamer pipeline and main loop."""
         logger.info("Starting CombinedRTSPClient")
         self.start_time = time.time()
+        logger.debug("Setting pipeline state to PLAYING")
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+            logger.error("Unable to set pipeline to PLAYING state")
             raise RuntimeError("Unable to set pipeline to PLAYING state")
         try:
             if self._timeout:
                 self._timer = threading.Timer(self._timeout, self._timeout_handler)
                 self._timer.start()
+            logger.debug("Starting main loop")
             self.loop.run()
+            logger.debug("Main loop exited")
         except Exception as e:
             self._report_error("Main Loop", f"Main loop error: {e}", e)
             self.stop()
+        finally:
+            logger.debug("CombinedRTSPClient.start() exiting")
 
     def stop(self) -> None:
         """Stop the GStreamer pipeline and quit the loop."""
         logger.info("Stopping CombinedRTSPClient")
+        logger.debug("Setting pipeline state to NULL")
         self.pipeline.set_state(Gst.State.NULL)
         if self.loop.is_running():
+            logger.debug("Quitting main loop")
             self.loop.quit()
 
     def __enter__(self) -> CombinedRTSPClient:
@@ -486,11 +514,6 @@ def run_combined_client_simple_example(
 if __name__ == "__main__":
     import argparse
     import cv2  # noqa: F401
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s"
-    )
 
     if mp.get_start_method(allow_none=True) != "spawn":
         mp.set_start_method("spawn", force=True)

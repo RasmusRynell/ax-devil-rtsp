@@ -15,6 +15,9 @@ import threading
 import time
 import xml.sax.saxutils
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GstRtspServer", "1.0") 
@@ -67,7 +70,9 @@ class AxisRTSPServer:
         # Give server time to start
         time.sleep(1)
         
-        return f"rtsp://127.0.0.1:{self.port}/axis-media/media.amp"
+        url = f"rtsp://127.0.0.1:{self.port}/axis-media/media.amp"
+        logger.info(f"AxisRTSPServer started at {url}")
+        return url
         
     def stop(self) -> None:
         """Stop the RTSP server."""
@@ -76,6 +81,7 @@ class AxisRTSPServer:
             self.loop.quit()
         if self.thread:
             self.thread.join(timeout=3)
+        logger.info(f"AxisRTSPServer on port {self.port} stopped.")
 
 
 class DualStreamAxisRTSPServer:
@@ -130,17 +136,21 @@ class DualStreamAxisRTSPServer:
         # Give server time to start
         time.sleep(2)
         
-        return f"rtsp://127.0.0.1:{self.port}/axis-media/media.amp"
+        url = f"rtsp://127.0.0.1:{self.port}/axis-media/media.amp"
+        logger.info(f"DualStreamAxisRTSPServer started at {url}")
+        return url
     
     def _on_media_configure(self, factory, media):
         """Called when media is configured for each client - setup isolated metadata generation."""
         def setup_metadata():
             pipeline = media.get_element()
             if not pipeline:
+                logger.error("No pipeline found in media configuration.")
                 return
                 
             appsrc = pipeline.get_by_name("pay1")
             if not appsrc:
+                logger.error("No appsrc named 'pay1' found in pipeline.")
                 return
                 
             # Configure appsrc for this specific media instance
@@ -197,8 +207,8 @@ class DualStreamAxisRTSPServer:
                 try:
                     ret = media.appsrc.emit('push-buffer', buffer)
                     return ret == Gst.FlowReturn.OK and media.timer_active
-                except:
-                    # If push fails, stop this timer
+                except Exception as exc:
+                    logger.error(f"Error pushing metadata buffer: {exc}")
                     return False
             
             # Start metadata generation at 2Hz for this specific media instance
@@ -229,6 +239,7 @@ class DualStreamAxisRTSPServer:
             self.loop.quit()
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=3)
+        logger.info(f"DualStreamAxisRTSPServer on port {self.port} stopped.")
 
 
 # Pytest fixtures using the cleaned-up server classes

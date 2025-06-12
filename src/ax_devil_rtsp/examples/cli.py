@@ -1,16 +1,17 @@
 from __future__ import annotations
 import argparse
 import logging
-import multiprocessing as mp
 import cv2
-import urllib.parse
+import time
+import sys
 
-from ..gstreamer_data_grabber import CombinedRTSPClient
+from ..rtsp_data_retrievers import RtspDataRetriever
+from ..utils import build_axis_rtsp_url
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="CLI for CombinedRTSPClient (video, metadata, RTP extension, session metadata)"
+        description="CLI for RTSP Data Retriever (video, metadata, RTP extension, session metadata)"
     )
     parser.add_argument("--ip", help="Camera IP address (required unless --rtsp-url provided)")
     parser.add_argument("--username", default="", help="Device username")
@@ -22,72 +23,9 @@ def parse_args():
     parser.add_argument("--rtp-ext", action="store_true", help="Enable RTP extension", default=True)
     parser.add_argument("--rtsp-url", help="Full RTSP URL, overrides all other arguments")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
+    parser.add_argument("--connection-timeout", type=int, default=30, help="Connection timeout in seconds")
+    parser.add_argument("--resolution", default="500x500", help="Video resolution (e.g. 1280x720)")
     return parser.parse_args()
-
-
-def build_rtsp_url(args):
-    if args.rtsp_url:
-        return args.rtsp_url
-
-    if not args.ip:
-        raise ValueError("No IP address provided")
-    
-    if args.no_video and args.no_metadata:
-        raise ValueError("You cannot ask for nothing and expect to receive something.")
-
-    cred = f"{args.username}:{args.password}@" if args.username or args.password else ""
-    url = f"rtsp://{cred}{args.ip}/axis-media/media.amp"
-
-    # Build query parameters in a dictionary.
-    params = {}
-    if args.no_video:
-        params["video"] = "0"
-        params["audio"] = "0"
-    
-    if args.rtp_ext:
-        params["onvifreplayext"] = "1"
-
-    if not args.no_video:
-        params["resolution"] = "500x500"
-
-    if not args.no_metadata:
-        params["analytics"] = "polygon"
-    params["camera"] = args.source
-
-    # If there are any query parameters, append them to the URL.
-    if params:
-        query_string = urllib.parse.urlencode(params)
-        url += "?" + query_string
-    print(f"Starting stream on {url=}")
-    return url
-
-
-def client_runner(
-    rtsp_url: str,
-    latency: int,
-    queue: mp.Queue,
-) -> None:
-    def video_cb(pl: dict):
-        queue.put({"kind": "video", **pl})
-
-    def metadata_cb(pl: dict):
-        queue.put({"kind": "metadata", **pl})
-
-    def session_cb(md: dict):
-        queue.put({"kind": "session", "data": md})
-
-    def error_cb(error: dict):
-        queue.put({"kind": "error", **error})
-
-    client = CombinedRTSPClient(
-        rtsp_url,
-        latency=latency,
-        video_frame_callback=video_cb,
-        metadata_callback=metadata_cb,
-        session_metadata_callback=session_cb,
-        error_callback=error_cb,
-    )
-    client.start()
 
 
 def main():
@@ -96,63 +34,97 @@ def main():
         level=getattr(logging, args.log_level.upper(), logging.INFO),
         format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s",
     )
-    try:
-        rtsp_url = build_rtsp_url(args)
-    except ValueError as e:
-        logging.error(e)
-        return
+    
+    if args.rtsp_url:
+        rtsp_url = args.rtsp_url
+    else:
+        try:
+            rtsp_url = build_axis_rtsp_url(
+                ip=args.ip,
+                username=args.username,
+                password=args.password,
+                video_source=args.source,
+                get_video_data=not args.no_video,
+                get_application_data=not args.no_metadata,
+                rtp_ext=args.rtp_ext,
+                resolution=args.resolution,
+            )
+        except ValueError as e:
+            logging.error(e)
+            sys.exit(1)
+    print(f"Starting stream on {rtsp_url=}")
 
-    # Multiprocessing setup
-    if mp.get_start_method(allow_none=True) != "spawn":
-        mp.set_start_method("spawn", force=True)
-    queue: mp.Queue = mp.Queue()
+    # Callback functions for handling different data types
+    def on_video_data(payload):
+        if args.no_video:
+            return
+        frame = payload["data"]
+        diag = payload["diagnostics"]
+        print(f"[VIDEO] frame shape={frame.shape}, diag={diag}")
+        cv2.imshow("Video", frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            # Signal to stop (we'll handle this in the main loop)
+            return
 
-    proc = mp.Process(
-        target=client_runner,
-        args=(
-            rtsp_url,
-            args.latency,
-            queue,
-        ),
-        daemon=True,
+    def on_application_data(payload):
+        if args.no_metadata:
+            return
+        xml = payload["data"]
+        diag = payload["diagnostics"]
+        print(f"[METADATA] {len(xml)} bytes, diag={diag}")
+        print(xml)
+
+    def on_session_start(payload):
+        print(f"[SESSION METADATA] {payload}")
+
+    def on_error(payload):
+        error_type = payload.get("error_type", "Unknown")
+        message = payload.get("message", "Unknown error")
+        error_count = payload.get("error_count", 0)
+        print(f"[ERROR] {error_type}: {message} (total errors: {error_count})")
+
+    # Create the retriever with appropriate callbacks
+    video_callback = None if args.no_video else on_video_data
+    metadata_callback = None if args.no_metadata else on_application_data
+
+    retriever = RtspDataRetriever(
+        rtsp_url=rtsp_url,
+        on_video_data=video_callback,
+        on_application_data=metadata_callback,
+        on_session_start=on_session_start,
+        on_error=on_error,
+        latency=args.latency,
+        connection_timeout=args.connection_timeout,
     )
-    proc.start()
-    logging.info("Spawned CombinedRTSPClient with PID %d", proc.pid)
 
     try:
-        while True:
-            item = queue.get(timeout=100)
-            kind = item.get("kind")
-            if kind == "video":
-                frame = item["data"]
-                diag = item["diagnostics"]
-                print(f"[VIDEO] frame shape={frame.shape}, diag={diag}")
-                cv2.imshow("Video", frame)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
-            elif kind == "metadata":
-                xml = item["data"]
-                diag = item["diagnostics"]
-                print(f"[METADATA] {len(xml)} bytes, diag={diag}")
-                print(xml)
-            elif kind == "session":
-                print(f"[SESSION METADATA] {item['data']}")
-            elif kind == "error":
-                error_type = item.get("error_type", "Unknown")
-                message = item.get("message", "Unknown error")
-                error_count = item.get("error_count", 0)
-                print(f"[ERROR] {error_type}: {message} (total errors: {error_count})")
-    except KeyboardInterrupt:
-        logging.info("Interrupted by user")
+        # Use context manager for automatic resource cleanup
+        with retriever:
+            logging.info("RTSP Data Retriever started")
+            print("Press Ctrl+C to stop, or 'q' in video window to quit")
+            
+            # Keep the main thread alive and handle keyboard interrupt
+            try:
+                while retriever.is_running:
+                    time.sleep(0.1)
+                    # Check if OpenCV window was closed (if video is enabled)
+                    if not args.no_video and cv2.getWindowProperty("Video", cv2.WND_PROP_VISIBLE) < 1:
+                        break
+            except KeyboardInterrupt:
+                logging.info("Interrupted by user")
+                
+    except Exception as e:
+        logging.error(f"Error running retriever: {e}")
     finally:
-        logging.info("Terminating client")
-        proc.terminate()
-        proc.join()
-        cv2.destroyAllWindows()
+        logging.info("Cleaning up...")
+        if not args.no_video:
+            cv2.destroyAllWindows()
+
 
 def cli() -> None:
     """Console-script entry point."""
     main()
+
 
 if __name__ == "__main__":
     cli()
