@@ -374,7 +374,7 @@ class TestConfigurationHandling:
             latency=100
         )
         
-        assert client.timeout == timeout
+        assert client._timeout == timeout
     
     def test_callback_configuration_completeness(self):
         """Test that all callback types can be configured."""

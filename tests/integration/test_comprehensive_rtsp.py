@@ -12,14 +12,12 @@ Tests all deep RTSP functionality:
 import pytest
 import time
 import threading
-import queue
 import json
 
 pytest.importorskip("gi")
 pytest.importorskip("numpy")
 from ax_devil_rtsp.gstreamer_data_grabber import CombinedRTSPClient
 from ax_devil_rtsp.examples.video_gstreamer import VideoGStreamerClient
-from ax_devil_rtsp.examples.metadata_gstreamer import SceneMetadataClient
 
 
 @pytest.mark.requires_gstreamer

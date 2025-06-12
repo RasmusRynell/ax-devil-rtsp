@@ -1,15 +1,10 @@
 import pytest
 import time
-import threading
 import queue
 
 pytest.importorskip("gi")
 pytest.importorskip("numpy")
 from ax_devil_rtsp.gstreamer_data_grabber import CombinedRTSPClient
-
-
-# test_combined_client_creation moved to tests/unit/test_client_creation.py
-
 
 @pytest.mark.requires_gstreamer
 def test_combined_client_connection_attempt(combined_test_rtsp_url):
@@ -33,12 +28,6 @@ def test_combined_client_connection_attempt(combined_test_rtsp_url):
         
     finally:
         client.stop()
-
-
-
-
-
-# test_combined_client_with_callbacks moved to tests/unit/test_client_creation.py
 
 
 @pytest.mark.requires_gstreamer

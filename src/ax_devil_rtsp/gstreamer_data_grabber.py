@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
-import time
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
@@ -60,12 +60,6 @@ class CombinedRTSPClient:
         self.error_cb = error_callback
         self.video_proc_fn = video_processing_fn
         self.shared_cfg = shared_config or {}
-        self.timeout = timeout
-
-        # Thread control
-        self._loop_thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
-        self._timer: Optional[threading.Timer] = None
 
         # Diagnostic counters and state
         self.start_time: Optional[float] = None
@@ -88,6 +82,9 @@ class CombinedRTSPClient:
 
         self._setup_elements()
         self._setup_bus()
+
+        self._timeout = timeout
+        self._timer: Optional[None | threading.Timer] = None
 
     def _setup_elements(self) -> None:
         """Build video and metadata branches of the pipeline."""
@@ -184,12 +181,10 @@ class CombinedRTSPClient:
     def _on_bus_message(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
         if msg.type == Gst.MessageType.EOS:
             logger.info("EOS received")
-            GLib.idle_add(self.stop)
+            self.stop()
         elif msg.type == Gst.MessageType.ERROR:
             err, dbg = msg.parse_error()
             self._report_error("GStreamer Error", f"{err.message} | {dbg}")
-            # Stop on error to prevent hanging - use idle_add to avoid thread join issue
-            GLib.idle_add(self.stop)
 
     def _on_pad_added(self, _src: Gst.Element, pad: Gst.Pad) -> None:
         caps = pad.get_current_caps()
@@ -328,8 +323,9 @@ class CombinedRTSPClient:
             self._report_error("Metadata Buffer", "Failed to map metadata buffer")
             return Gst.FlowReturn.ERROR
 
-        # Copy the data before unmapping the buffer, 
-        # TODO: performance improvement possible by not copying
+        if self._timer is not None:
+            self._timer.cancel()
+
         raw = bytes(info.data)
         buf.unmap(info)
 
@@ -408,68 +404,33 @@ class CombinedRTSPClient:
             except Exception as cb_error:
                 logger.error("Error callback failed: %s", cb_error)
 
-    def _run_loop(self) -> None:
-        """Run the GStreamer main loop in a separate thread."""
+    def _timeout_handler(self) -> None:
+        """Handle timeout by stopping client."""
+        logger.warning(f"Timeout reached ({self._timeout}s), stopping client")
+        self._report_error("Timeout", f"Connection timed out in {self._timeout}s")
+        self.stop()
+
+    def start(self) -> None:
+        """Start the GStreamer pipeline and main loop."""
+        logger.info("Starting CombinedRTSPClient")
+        self.start_time = time.time()
+        if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+            raise RuntimeError("Unable to set pipeline to PLAYING state")
         try:
+            if self._timeout:
+                self._timer = threading.Timer(self._timeout, self._timeout_handler)
+                self._timer.start()
             self.loop.run()
         except Exception as e:
             self._report_error("Main Loop", f"Main loop error: {e}", e)
-        finally:
-            logger.debug("GStreamer main loop exited")
-
-    def start(self) -> None:
-        """Start the GStreamer pipeline and main loop in a separate thread."""
-        logger.info("Starting CombinedRTSPClient")
-        self.start_time = time.time()
-        
-        # Start pipeline
-        state_ret = self.pipeline.set_state(Gst.State.PLAYING)
-        if state_ret == Gst.StateChangeReturn.FAILURE:
-            raise RuntimeError("Unable to set pipeline to PLAYING state")
-        
-        # Start main loop in separate thread
-        self._stop_event.clear()
-        self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
-        self._loop_thread.start()
-        
-        # Handle timeout if specified
-        if self.timeout:
-            self._timer = threading.Timer(self.timeout, self._timeout_handler)
-            self._timer.daemon = True
-            self._timer.start()
-
-    def _timeout_handler(self) -> None:
-        """Handle timeout by stopping the client."""
-        if not self._stop_event.is_set():
-            logger.warning(f"Timeout reached ({self.timeout}s), stopping client")
-            self._report_error("Timeout", f"Client timed out after {self.timeout} seconds")
             self.stop()
 
     def stop(self) -> None:
         """Stop the GStreamer pipeline and quit the loop."""
-        if self._stop_event.is_set():
-            return  # Already stopping
-            
         logger.info("Stopping CombinedRTSPClient")
-        self._stop_event.set()
-        
-        # Cancel timeout timer if it exists
-        if self._timer:
-            self._timer.cancel()
-            self._timer = None
-        
-        # Stop pipeline
         self.pipeline.set_state(Gst.State.NULL)
-        
-        # Quit main loop
         if self.loop.is_running():
             self.loop.quit()
-        
-        # Wait for loop thread to finish
-        if self._loop_thread and self._loop_thread.is_alive():
-            self._loop_thread.join(timeout=1.0)
-            if self._loop_thread.is_alive():
-                logger.warning("Main loop thread did not exit cleanly")
 
     def __enter__(self) -> CombinedRTSPClient:
         self.start()
@@ -486,7 +447,6 @@ def run_combined_client_simple_example(
     queue: Optional[mp.Queue] = None,
     video_processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
     shared_config: Optional[dict] = None,
-    timeout: Optional[float] = 30.0,
 ) -> None:
     """Example runner: spawns client and logs or queues payloads."""
     def vid_cb(pl: dict) -> None:
@@ -519,7 +479,6 @@ def run_combined_client_simple_example(
         error_callback=err_cb,
         video_processing_fn=video_processing_fn,
         shared_config=shared_config or {},
-        timeout=timeout,
     )
     client.start()
 

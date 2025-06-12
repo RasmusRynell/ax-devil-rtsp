@@ -25,7 +25,7 @@ def test_combined_client_creation():
     assert client.pipeline is not None
     assert client.rtsp_url == dummy_url
     assert client.latency == 100
-    assert client.timeout == 5.0
+    assert client._timeout == 5.0
 
 
 @pytest.mark.requires_gstreamer
