@@ -91,7 +91,7 @@ def test_callback_dispatch_with_none_callbacks():
         video_callback.assert_called_once_with({"kind": "video", "data": "video_data"}) 
 
 
-def test_dispatch_waits_for_delayed_data():
+def test_dispatch_waits_for_delayed_data(monkeypatch):
     """
     The dispatch loop should wait for delayed data and call the callback when data arrives.
     """
@@ -102,16 +102,16 @@ def test_dispatch_waits_for_delayed_data():
     def video_callback(payload):
         video_callback_called.set()
     retriever = RtspDataRetriever(rtsp_url="rtsp://test.url/stream", on_video_data=video_callback)
-    # Use a real queue for thread safety
-    retriever._queue = retriever._queue  # already a mp.Queue from __init__
+    # Patch the _proc.is_alive method to always return True
+    class DummyProc:
+        def is_alive(self):
+            return True
+    retriever._proc = DummyProc()
     retriever._stop_event = threading.Event()
-    # Start dispatch loop in a thread
     dispatch_thread = threading.Thread(target=retriever._queue_dispatch_loop)
     dispatch_thread.start()
-    # Wait a bit, then put an item on the queue
     time.sleep(0.5)
     retriever._queue.put({"kind": "video", "data": "delayed_data"})
-    # Wait for callback or timeout
     assert video_callback_called.wait(timeout=2), "Callback was not called after delayed data"
     retriever._stop_event.set()
     dispatch_thread.join(timeout=1)
