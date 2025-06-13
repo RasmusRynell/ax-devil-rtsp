@@ -2,20 +2,24 @@
 Integration test for metadata (scene metadata) data flow with RtspApplicationDataRetriever.
 """
 
-import pytest
-import time
+import threading
+
 from ax_devil_rtsp.rtsp_data_retrievers import RtspApplicationDataRetriever
+from .utils import wait_for_all
 
 
 def test_metadata_data_flow(rtsp_url):
     """
     Test that RtspApplicationDataRetriever receives scene metadata and manages resources.
     """
-    received_metadata = []
+    received_application_data = []
     errors = []
+
+    application_data_event = threading.Event()
     
     def on_application_data(payload):
-        received_metadata.append(payload)
+        received_application_data.append(payload)
+        application_data_event.set()
     
     def on_error(payload):
         errors.append(payload)
@@ -33,22 +37,21 @@ def test_metadata_data_flow(rtsp_url):
     retriever.start()
     assert retriever.is_running
     
-    # Wait for metadata (give enough time for connection and initial metadata)
-    time.sleep(5)
-    
+    # Wait for application_data (give enough time for connection and initial application_data)
+    success = wait_for_all([application_data_event], timeout=60)
+
     retriever.stop()
     assert not retriever.is_running
     
-    # Verify we received at least one metadata frame
-    assert len(received_metadata) > 0, "Should have received at least one metadata frame"
+    assert success, "Timed out waiting for application_data"
+
+    # Verify we received at least one application_data frame
+    assert len(received_application_data) > 0, "Should have received at least one application_data frame"
     
-    # Verify metadata structure
-    metadata = received_metadata[0]
-    assert "kind" in metadata
-    assert metadata["kind"] == "metadata"
+    # Verify application_data structure
+    application_data = received_application_data[0]
+    assert "kind" in application_data
+    assert application_data["kind"] == "metadata"
     
     # Should not have errors in normal operation
     assert len(errors) == 0, f"Unexpected errors: {errors}"
-
-
- 

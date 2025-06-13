@@ -1,5 +1,8 @@
 # Test Strategy for `tests_new`
 
+## TODO:
+* Add more tests such as "on start", "on stop", and more?
+
 This directory contains tests for the RTSP data retriever system, focusing on meaningful, high-value coverage rather than exhaustive or redundant tests.
 
 ## Strategy

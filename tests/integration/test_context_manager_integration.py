@@ -2,9 +2,10 @@
 Integration test for context manager resource management.
 """
 
-import pytest
-import time
+import threading
+
 from ax_devil_rtsp.rtsp_data_retrievers import RtspVideoDataRetriever
+from .utils import wait_for_all
 
 
 def test_context_manager_resource_management(rtsp_url):
@@ -13,8 +14,11 @@ def test_context_manager_resource_management(rtsp_url):
     """
     received_frames = []
     
+    video_event = threading.Event()
+
     def on_video_data(payload):
         received_frames.append(payload)
+        video_event.set()
     
     retriever = RtspVideoDataRetriever(
         rtsp_url=rtsp_url,
@@ -30,14 +34,12 @@ def test_context_manager_resource_management(rtsp_url):
         # Should be running inside the context
         assert retriever.is_running
         
-        # Wait for some data
-        time.sleep(3)
+        success = wait_for_all([video_event], timeout=60)
+
+    assert success, "Timed out waiting for video"
     
     # Should be stopped after exiting context
     assert not retriever.is_running
     
     # Should have received some frames
     assert len(received_frames) > 0, "Should have received frames while in context"
-
-
-# Moved test_context_manager_exception_handling to unit/test_context_manager.py 

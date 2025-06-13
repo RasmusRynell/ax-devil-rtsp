@@ -260,6 +260,7 @@ def rtsp_server():
 def dual_stream_rtsp_server():
     """Provide enhanced RTSP server with both video and metadata streams."""
     try:
+        # TODO: Add check for others running on this port, then change port.
         server = DualStreamAxisRTSPServer(port=8555)
         url = server.start()
         yield url

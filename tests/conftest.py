@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 import types
 
+from ax_devil_rtsp.utils import build_axis_rtsp_url
+
 # Configure logging for tests (DEBUG level, detailed format)
 logging.basicConfig(
     level=logging.DEBUG,
@@ -51,7 +53,15 @@ def rtsp_url(rtsp_credentials, dual_stream_rtsp_server):
     if use_real:
         creds = rtsp_credentials
         # Construct the real device RTSP URL (adjust path as needed)
-        return f"rtsp://{creds['username']}:{creds['password']}@{creds['ip']}/axis-media/media.amp"
+        return build_axis_rtsp_url(
+            ip=creds["ip"],
+            username=creds["username"],
+            password=creds["password"],
+            video_source=1,
+            get_video_data=True,
+            get_application_data=True,
+            rtp_ext=False
+        )
     else:
         # Use the local dual-stream server (video + metadata)
-        return dual_stream_rtsp_server 
+        return dual_stream_rtsp_server

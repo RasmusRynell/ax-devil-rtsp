@@ -244,8 +244,9 @@ class RtspDataRetriever(ABC):
         Handles EOFError/OSError gracefully if the parent process is dead.
         Catches and logs exceptions in user callbacks to avoid breaking the loop.
         """
+        wait_time_s = 10 # TODO: Move this? make it configurable?
+        MAX_EMPTY_POLLS = wait_time_s/self.QUEUE_POLL_INTERVAL
         consecutive_empty = 0
-        MAX_EMPTY_POLLS = 4  # ~2 seconds with default poll interval
         while not self._stop_event.is_set():
             if self._queue is None:
                 break

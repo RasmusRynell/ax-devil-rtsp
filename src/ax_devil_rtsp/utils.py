@@ -164,7 +164,7 @@ def build_axis_rtsp_url(
     get_video_data: bool,
     get_application_data: bool,
     rtp_ext: bool,
-    resolution: str,
+    resolution: str = None, # Will let the device decide what the resolution should be
 ) -> str:
     """
     Build an RTSP URL for Axis cameras.
@@ -181,7 +181,7 @@ def build_axis_rtsp_url(
         params["audio"] = "0"
     if rtp_ext:
         params["onvifreplayext"] = "1"
-    if get_video_data:
+    if get_video_data and resolution is not None:
         params["resolution"] = resolution
     if get_application_data:
         params["analytics"] = "polygon"
