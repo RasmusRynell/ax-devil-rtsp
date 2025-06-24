@@ -19,12 +19,15 @@ gi.require_version("GstRtp", "1.0")
 gi.require_version("GstRtsp", "1.0")
 from gi.repository import Gst, GstRtp, GLib, GstRtsp
 
-# Ensure subprocess logging is visible
-if __name__ == "__main__" or not logging.getLogger().hasHandlers():
+# Configure basic logging only when run as a standalone script. When this
+# module is imported (e.g. through the high level retrievers) logging should
+# be configured by the parent application so that options like `--log-level`
+# work as expected.
+if __name__ == "__main__":
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        stream=sys.stdout
+        stream=sys.stdout,
     )
 
 logger = logging.getLogger("ax-devil-rtsp.CombinedRTSPClient")

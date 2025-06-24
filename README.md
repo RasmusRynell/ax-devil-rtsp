@@ -128,8 +128,11 @@ metadata_client.start()  # Starts streaming in current thread
 <p>
 
 ```bash
-# Display video stream in window
+# Display video stream in window at INFO level (default)
 ax-devil-rtsp video --ip 192.168.1.90 --username admin --password secret
+
+# Show only warnings and errors
+ax-devil-rtsp video --ip 192.168.1.90 --log-level WARNING
 ```
 </p>
 </details>
