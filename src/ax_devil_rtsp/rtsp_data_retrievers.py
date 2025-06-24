@@ -70,6 +70,7 @@ def _client_process(
     video_processing_fn: Optional[Callable],
     shared_config: Optional[dict],
     connection_timeout: Optional[float],
+    log_level: int,
 ):
     """
     Subprocess target: Instantiates CombinedRTSPClient and pushes events to the queue.
@@ -77,6 +78,11 @@ def _client_process(
     """
     import sys
     import time
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        stream=sys.stdout,
+    )
     parent_pid = os.getppid()
     client_should_stop = threading.Event()
 
@@ -153,6 +159,9 @@ class RtspDataRetriever(ABC):
         Optional shared config for the video processing function.
     connection_timeout : int, default=30
         Connection timeout in seconds.
+    log_level : int, optional
+        Logging level used in the subprocess. Defaults to the parent's
+        effective logging level.
     """
     QUEUE_POLL_INTERVAL: float = 0.5  # seconds
 
@@ -167,6 +176,7 @@ class RtspDataRetriever(ABC):
         video_processing_fn: Optional[Callable] = None,
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
+        log_level: Optional[int] = None,
     ):
         # Reset internal state to avoid stale references if start() is called after a crash
         self._proc: Optional[mp.Process] = None
@@ -184,6 +194,7 @@ class RtspDataRetriever(ABC):
         self._connection_timeout = connection_timeout
         self._on_error = on_error
         self._on_session_start = on_session_start
+        self._log_level = log_level if log_level is not None else logging.getLogger().getEffectiveLevel()
 
     def start(self) -> None:
         """
@@ -206,6 +217,7 @@ class RtspDataRetriever(ABC):
                 self._video_processing_fn,
                 self._shared_config,
                 self._connection_timeout,
+                self._log_level,
             ),
         )
         self._proc.start()
@@ -327,6 +339,7 @@ class RtspVideoDataRetriever(RtspDataRetriever):
         video_processing_fn: Optional[Callable] = None,
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
+        log_level: Optional[int] = None,
     ):
         super().__init__(
             rtsp_url=rtsp_url,
@@ -338,6 +351,7 @@ class RtspVideoDataRetriever(RtspDataRetriever):
             video_processing_fn=video_processing_fn,
             shared_config=shared_config,
             connection_timeout=connection_timeout,
+            log_level=log_level,
         )
 
 
@@ -355,6 +369,7 @@ class RtspApplicationDataRetriever(RtspDataRetriever):
         video_processing_fn: Optional[Callable] = None,
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
+        log_level: Optional[int] = None,
     ):
         super().__init__(
             rtsp_url=rtsp_url,
@@ -366,4 +381,5 @@ class RtspApplicationDataRetriever(RtspDataRetriever):
             video_processing_fn=video_processing_fn,
             shared_config=shared_config,
             connection_timeout=connection_timeout,
+            log_level=log_level,
         )
