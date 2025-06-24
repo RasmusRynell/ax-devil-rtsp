@@ -1,5 +1,5 @@
 """
-Integration test for metadata (scene metadata) data flow with RtspApplicationDataRetriever.
+Integration test for application data (AXIS scene metadata) data flow with RtspApplicationDataRetriever.
 """
 
 import threading
@@ -8,9 +8,9 @@ from ax_devil_rtsp.rtsp_data_retrievers import RtspApplicationDataRetriever
 from .utils import wait_for_all
 
 
-def test_metadata_data_flow(rtsp_url):
+def test_application_data_data_flow(rtsp_url):
     """
-    Test that RtspApplicationDataRetriever receives scene metadata and manages resources.
+    Test that RtspApplicationDataRetriever receives application data and manages resources.
     """
     received_application_data = []
     errors = []
@@ -51,7 +51,7 @@ def test_metadata_data_flow(rtsp_url):
     # Verify application_data structure
     application_data = received_application_data[0]
     assert "kind" in application_data
-    assert application_data["kind"] == "metadata"
+    assert application_data["kind"] == "application_data"
     
     # Should not have errors in normal operation
     assert len(errors) == 0, f"Unexpected errors: {errors}"

@@ -8,14 +8,14 @@ This directory contains tests for the RTSP data retriever system, focusing on me
 ## Strategy
 
 - **Integration-First:**  
-  We use a local GStreamer-based RTSP server (`enhanced_rtsp_server.py`) to run true integration tests. This validates that our retrievers work end-to-end with realistic RTSP streams, including both video and metadata, closely simulating real-world Axis camera behavior.
+  We use a local GStreamer-based RTSP server (`enhanced_rtsp_server.py`) to run true integration tests. This validates that our retrievers work end-to-end with realistic RTSP streams, including both video and application data, closely simulating real-world Axis camera behavior.
 
 - **Targeted Unit Tests:**  
   Unit tests are included for logic that benefits from isolated testing—such as error handling, callback dispatch, or edge cases not easily triggered in integration tests. We avoid unit tests for code that is already thoroughly exercised by integration tests.
 
 - **Minimal, High-Value Tests:**  
   We focus on a small number of well-designed tests that:
-  - Validate end-to-end data flow (video and metadata) from server to retriever callbacks.
+  - Validate end-to-end data flow (video and application data) from server to retriever callbacks.
   - Ensure correct process/thread lifecycle management (start, stop, cleanup).
   - Confirm robust error handling and resource cleanup, even on failure.
   - Test context manager usage for automatic resource management.
@@ -29,7 +29,7 @@ This directory contains tests for the RTSP data retriever system, focusing on me
 ## Test Types
 
 - **Integration Tests:**  
-  - Use the local RTSP server to verify that retrievers receive and process both video and metadata streams as expected.
+  - Use the local RTSP server to verify that retrievers receive and process both video and application data streams as expected.
   - Validate callback invocation, error propagation, and resource cleanup in real scenarios.
 
 - **Unit Tests:**  

@@ -16,14 +16,14 @@ def test_callback_dispatch_logic():
     """
     # Mock callbacks
     video_callback = Mock()
-    metadata_callback = Mock()
+    application_data_callback = Mock()
     error_callback = Mock()
     session_callback = Mock()
     
     retriever = RtspDataRetriever(
         rtsp_url="rtsp://test.url/stream",
         on_video_data=video_callback,
-        on_application_data=metadata_callback,
+        on_application_data=application_data_callback,
         on_error=error_callback,
         on_session_start=session_callback
     )
@@ -36,7 +36,7 @@ def test_callback_dispatch_logic():
         # Set up queue behavior
         test_items = [
             {"kind": "video", "data": "video_data"},
-            {"kind": "metadata", "data": "metadata_data"},
+            {"kind": "application_data", "data": "application_data_data"},
             {"kind": "error", "data": "error_data"},
             {"kind": "session_start", "data": "session_data"}
         ]
@@ -53,7 +53,7 @@ def test_callback_dispatch_logic():
         
         # Verify correct callbacks were called
         video_callback.assert_called_once_with({"kind": "video", "data": "video_data"})
-        metadata_callback.assert_called_once_with({"kind": "metadata", "data": "metadata_data"})
+        application_data_callback.assert_called_once_with({"kind": "application_data", "data": "application_data_data"})
         error_callback.assert_called_once_with({"kind": "error", "data": "error_data"})
         session_callback.assert_called_once_with({"kind": "session_start", "data": "session_data"})
 
@@ -76,7 +76,7 @@ def test_callback_dispatch_with_none_callbacks():
         
         test_items = [
             {"kind": "video", "data": "video_data"},
-            {"kind": "metadata", "data": "metadata_data"},  # Should be ignored
+            {"kind": "application_data", "data": "application_data_data"},  # Should be ignored
             {"kind": "error", "data": "error_data"},        # Should be ignored
         ]
         

@@ -1,9 +1,9 @@
 """
 RTSP Data Retriever Classes
 
-This module provides high-level, process-safe retrievers for video and/or application (metadata)
+This module provides high-level, process-safe retrievers for video and/or application
 data from RTSP streams, with a focus on Axis cameras. Use the specialized retrievers for
-video-only, metadata-only, or combined retrieval. For Axis-style URLs, use build_axis_rtsp_url.
+video-only, application-data-only, or combined retrieval. For Axis-style URLs, use build_axis_rtsp_url.
 
 All retrievers run the GStreamer client in a subprocess and communicate via a thread-safe queue.
 
@@ -102,8 +102,8 @@ def _client_process(
         logger.info(f"CombinedRTSPClient subprocess starting for {rtsp_url}")
         def video_cb(payload):
             queue.put({"kind": "video", **payload})
-        def meta_cb(payload):
-            queue.put({"kind": "metadata", **payload})
+        def application_data_cb(payload):
+            queue.put({"kind": "application_data", **payload})
         def session_cb(payload):
             queue.put({"kind": "session_start", **payload})
         def error_cb(payload):
@@ -112,8 +112,8 @@ def _client_process(
             rtsp_url,
             latency=latency,
             video_frame_callback=video_cb,
-            metadata_callback=meta_cb,
-            session_metadata_callback=session_cb,
+            application_data_callback=application_data_cb,
+            session_application_data_callback=session_cb,
             error_callback=error_cb,
             video_processing_fn=video_processing_fn,
             shared_config=shared_config or {},
@@ -146,7 +146,7 @@ class RtspDataRetriever(ABC):
     on_video_data : VideoDataCallback, optional
         Callback for video frames. Receives a payload dict from CombinedRTSPClient.
     on_application_data : ApplicationDataCallback, optional
-        Callback for application/metadata frames. Receives a payload dict.
+        Callback for application data. Receives a payload dict.
     on_error : ErrorCallback, optional
         Callback for errors. Receives a payload dict.
     on_session_start : SessionStartCallback, optional
@@ -288,8 +288,8 @@ class RtspDataRetriever(ABC):
                 if kind == "video" and self._on_video_data:
                     logger.debug("Dispatching video callback.")
                     self._on_video_data(item)
-                elif kind == "metadata" and self._on_application_data:
-                    logger.debug("Dispatching metadata callback.")
+                elif kind == "application_data" and self._on_application_data:
+                    logger.debug("Dispatching application data callback.")
                     self._on_application_data(item)
                 elif kind == "error" and self._on_error:
                     logger.debug("Dispatching error callback.")
@@ -357,7 +357,7 @@ class RtspVideoDataRetriever(RtspDataRetriever):
 
 class RtspApplicationDataRetriever(RtspDataRetriever):
     """
-    Retrieve only application (metadata) data from an RTSP stream.
+    Retrieve only application (Axis Scene Description) data from an RTSP stream.
     """
     def __init__(
         self,

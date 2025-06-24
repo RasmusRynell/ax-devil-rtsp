@@ -28,7 +28,7 @@ class VideoGStreamerClient:
         rtsp_url: str,
         latency: int = 100,
         frame_handler_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        session_metadata_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        session_application_data_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
         shared_config: Optional[dict] = None,
         timeout: Optional[float] = None,
@@ -44,7 +44,7 @@ class VideoGStreamerClient:
                 "diagnostics": { ... },
                 "latest_rtp_data": <latest RTP extension data dict or None>
             }
-        :param session_metadata_callback: A callback receiving session-level metadata dicts:
+        :param session_application_data_callback: A callback receiving session-level metadata dicts:
             e.g. {"stream_name": ..., "caps": ..., "structure": ...}
                   or {"sdes": { ... }}
         :param processing_fn: A function that processes each frame using shared_config.
@@ -53,7 +53,7 @@ class VideoGStreamerClient:
         self.rtsp_url = rtsp_url
         self.latency = latency
         self.frame_handler_callback = frame_handler_callback
-        self.session_metadata_callback = session_metadata_callback
+        self.session_application_data_callback = session_application_data_callback
         self.processing_fn = processing_fn
         self.shared_config = shared_config if shared_config is not None else {}
 
@@ -209,8 +209,8 @@ class VideoGStreamerClient:
             "caps": caps.to_string(),
             "structure": structure.to_string(),
         }
-        if self.session_metadata_callback:
-            self.session_metadata_callback(parse_session_metadata(metadata))
+        if self.session_application_data_callback:
+            self.session_application_data_callback(parse_session_metadata(metadata))
         logger.info("Session metadata: %s", metadata)
 
     def _on_sdes_notify(self, src: Gst.Element, pspec) -> None:
@@ -223,8 +223,8 @@ class VideoGStreamerClient:
             for key in sdes_struct.keys():
                 sdes_data[key] = sdes_struct.get_value(key)
 
-        if self.session_metadata_callback:
-            self.session_metadata_callback({"sdes": sdes_data})
+        if self.session_application_data_callback:
+            self.session_application_data_callback({"sdes": sdes_data})
         logger.info("Session SDES items: %s", sdes_data)
 
     def _rtp_probe(self, pad, info):
@@ -482,14 +482,14 @@ def run_video_client_simple_example(
                 payload.get("latest_rtp_data")
             )
 
-    def metadata_callback(payload: Dict[str, Any]) -> None:
+    def application_data_callback(payload: Dict[str, Any]) -> None:
         print(payload)
 
     client = VideoGStreamerClient(
         rtsp_url,
         latency=latency,
         frame_handler_callback=default_callback,
-        session_metadata_callback=metadata_callback,
+        session_application_data_callback=application_data_callback,
         processing_fn=processing_fn,
         shared_config=shared_config
     )

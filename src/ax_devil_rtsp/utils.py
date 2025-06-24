@@ -35,15 +35,15 @@ def configure_logging(level=logging.INFO):
     return logging.getLogger("ax-devil-rtsp") 
 
 
-def parse_metadata_xml(xml_data: bytes) -> dict:
+def parse_axis_scene_metadata_xml(xml_data: bytes) -> dict:
     """
-    Parse ONVIF metadata XML and extract relevant information.
+    Parse ONVIF Scene metadata XML and extract relevant information.
     
     Args:
         xml_data: Raw XML bytes data
         
     Returns:
-        dict: Parsed metadata information
+        dict: Parsed Scene metadata information
     """
     try:
         try:

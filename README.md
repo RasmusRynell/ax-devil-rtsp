@@ -6,7 +6,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Type Hints](https://img.shields.io/badge/Type%20Hints-Strict-brightgreen.svg)](https://www.python.org/dev/peps/pep-0484/)
 
-A Python library for RTSP streaming from Axis cameras with video and metadata support.
+A Python library for RTSP streaming from Axis cameras with video and AXIS Scene metadata support.
+
+*The words 'AXIS Scene Metadata' is hereby called 'application data' in this project.*
 
 See also: [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-api) and [ax-devil-mqtt](https://github.com/rasmusrynell/ax-devil-mqtt) for other Axis device management tools.
 
@@ -33,45 +35,38 @@ See also: [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-
       <th>Feature</th>
       <th>Description</th>
       <th align="center">Python API</th>
-      <th align="center">CLI Usage</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td><b>🔄 Combined Streaming</b></td>
-      <td>Simultaneous video and metadata streaming (default)</td>
+      <td>Simultaneous video and application data streaming (default)</td>
       <td align="center"><code>RtspDataRetriever</code></td>
-      <td align="center">Default behavior</td>
     </tr>
     <tr>
       <td><b>📹 Video Only</b></td>
-      <td>Stream video frames without metadata</td>
+      <td>Stream video frames without application data</td>
       <td align="center"><code>RtspVideoDataRetriever</code></td>
-      <td align="center"><code>--no-metadata</code></td>
     </tr>
     <tr>
-      <td><b>📊 Metadata Only</b></td>
-      <td>Stream scene metadata without video</td>
+      <td><b>📊 Application Data (AXIS Scene Metadata) Only</b></td>
+      <td>Stream scene application data without video</td>
       <td align="center"><code>RtspApplicationDataRetriever</code></td>
-      <td align="center"><code>--no-video</code></td>
     </tr>
     <tr>
       <td><b>⚡ Real-time Processing</b></td>
       <td>Frame-by-frame processing with custom callbacks</td>
       <td align="center"><code>on_video_data</code></td>
-      <td align="center">N/A</td>
     </tr>
     <tr>
       <td><b>🎯 RTP Extension Data</b></td>
       <td>Access to ONVIF RTP extension data and timing information (enabled by default)</td>
       <td align="center"><code>rtp_ext=True</code></td>
-      <td align="center">Default enabled</td>
     </tr>
     <tr>
       <td><b>🛠️ Axis URL Builder</b></td>
       <td>Utility for constructing Axis-compatible RTSP URLs</td>
       <td align="center"><code>build_axis_rtsp_url</code></td>
-      <td align="center">N/A</td>
     </tr>
   </tbody>
 </table>
@@ -99,10 +94,10 @@ def on_video_data(payload):
     diagnostics = payload["diagnostics"]
     print(f"Video frame: {frame.shape}, {diagnostics}")
 
-def on_metadata(payload):
+def on_application_data(payload):
     xml_data = payload["data"]
     diagnostics = payload["diagnostics"]
-    print(f"Metadata: {len(xml_data)} bytes, {diagnostics}")
+    print(f"Application data: {len(xml_data)} bytes, {diagnostics}")
 
 def on_error(payload):
     print(f"Error: {payload['message']}")
@@ -112,7 +107,7 @@ rtsp_url = "rtsp://username:password@192.168.1.90/axis-media/media.amp?analytics
 retriever = RtspDataRetriever(
     rtsp_url=rtsp_url,
     on_video_data=on_video_data,
-    on_application_data=on_metadata,
+    on_application_data=on_application_data,
     on_error=on_error,
     latency=100
 )
@@ -141,7 +136,7 @@ video_retriever = RtspVideoDataRetriever(axis_url, on_video_data=on_video_data)
 
 ### CLI Usage
 
-**Basic Usage (streams both video and metadata):**
+**Basic Usage (streams both video and application data):**
 ```bash
 ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret
 ```
@@ -161,11 +156,14 @@ ax-devil-rtsp --rtsp-url "rtsp://admin:secret@192.168.1.90/axis-media/media.amp?
 
 **Specialized Modes:**
 ```bash
-# Video only (no metadata overlay)
-ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --no-metadata
+# Video only (no application data overlay)
+ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --only-video
 
-# Metadata only (no video window)  
-ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --no-video
+# Application data only (no video window)  
+ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --only-application-data
+
+# Disable RTP extension data
+ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --no-rtp-ext
 ```
 
 ### Environment Variables (Optional)

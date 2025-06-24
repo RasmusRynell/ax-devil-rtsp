@@ -31,9 +31,9 @@ def test_video_retriever_lifecycle_no_callback():
     assert not retriever.is_running
 
 
-def test_metadata_retriever_lifecycle_no_callback():
+def test_application_data_retriever_lifecycle_no_callback():
     """
-    Test that metadata retriever works without callbacks (robustness test).
+    Test that application data retriever works without callbacks (robustness test).
     
     Verifies that the retriever can be started and stopped cleanly even when:
     - No data callbacks are provided  

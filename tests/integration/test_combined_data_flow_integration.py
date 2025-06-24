@@ -56,6 +56,6 @@ def test_combined_data_flow(rtsp_url):
     assert video_frame.get("kind") == "video", "Video frame should have 'kind': 'video'"
 
     application_data_frame = received_application_data[0]
-    assert application_data_frame.get("kind") == "metadata", "Application data frame should have 'kind': 'metadata'"
+    assert application_data_frame.get("kind") == "application_data", "Application data frame should have 'kind': 'application_data'"
 
     assert not errors, f"Unexpected errors: {errors}"

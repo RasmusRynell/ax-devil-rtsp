@@ -7,13 +7,37 @@ import sys
 import queue
 import numpy as np
 
-from ..rtsp_data_retrievers import RtspDataRetriever
+from ..rtsp_data_retrievers import RtspDataRetriever, RtspVideoDataRetriever, RtspApplicationDataRetriever
 from ..utils import build_axis_rtsp_url
+
+
+def simple_video_processing_example(frame: np.ndarray, shared_config: dict) -> np.ndarray:
+    """
+    Example video processing function that demonstrates the video_processing_fn feature.
+    Adds a timestamp overlay and optionally applies brightness adjustment.
+    """
+    processed = frame.copy()
+    
+    # Add timestamp overlay
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    cv2.putText(processed, timestamp, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    
+    # Apply brightness adjustment if configured
+    brightness = shared_config.get("brightness_adjustment", 0)
+    if brightness != 0:
+        processed = cv2.convertScaleAbs(processed, alpha=1.0, beta=brightness)
+    
+    # Add frame counter
+    shared_config["frame_count"] = shared_config.get("frame_count", 0) + 1
+    frame_text = f"Frame: {shared_config['frame_count']}"
+    cv2.putText(processed, frame_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+    
+    return processed
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="CLI for RTSP Data Retriever (video, metadata, RTP extension, session metadata)"
+        description="CLI for RTSP Data Retriever (video, application data, RTP extension, session metadata)"
     )
     parser.add_argument(
         "--ip", help="Camera IP address (required unless --rtsp-url provided)"
@@ -25,13 +49,13 @@ def parse_args():
     )
     parser.add_argument("--latency", type=int, default=100, help="RTSP latency in ms")
     parser.add_argument(
-        "--no-video", action="store_true", help="Disable video frames", default=False
+        "--only-video", action="store_true", help="Enable only video frames (disable application data) - demonstrates RtspVideoDataRetriever", default=False
     )
     parser.add_argument(
-        "--no-metadata", action="store_true", help="Disable metadata XML", default=False
+        "--only-application-data", action="store_true", help="Enable only application data XML (disable video) - demonstrates RtspApplicationDataRetriever", default=False
     )
     parser.add_argument(
-        "--rtp-ext", action="store_true", help="Enable RTP extension", default=True
+        "--no-rtp-ext", action="store_false", dest="rtp_ext", help="Disable RTP extension", default=True
     )
     parser.add_argument(
         "--rtsp-url", help="Full RTSP URL, overrides all other arguments"
@@ -50,6 +74,19 @@ def parse_args():
     )
     parser.add_argument(
         "--resolution", default=None, help="Video resolution (e.g. 1280x720 or 500x500) (default: None, lets device decide)"
+    )
+    # Advanced feature demonstrations
+    parser.add_argument(
+        "--enable-video-processing", action="store_true", 
+        help="Demonstrate video_processing_fn with timestamp overlay and brightness adjustment", default=False
+    )
+    parser.add_argument(
+        "--brightness-adjustment", type=int, default=0,
+        help="Brightness adjustment value for video processing example (-100 to 100)"
+    )
+    parser.add_argument(
+        "--manual-lifecycle", action="store_true",
+        help="Demonstrate manual start()/stop() instead of context manager", default=False
     )
     return parser.parse_args()
 
@@ -70,8 +107,8 @@ def main():
                 username=args.username,
                 password=args.password,
                 video_source=args.source,
-                get_video_data=not args.no_video,
-                get_application_data=not args.no_metadata,
+                get_video_data=not args.only_application_data,
+                get_application_data=not args.only_video,
                 rtp_ext=args.rtp_ext,
                 resolution=args.resolution,
             )
@@ -85,7 +122,7 @@ def main():
     video_frames: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=1)
 
     def on_video_data(payload):
-        if args.no_video:
+        if args.only_application_data:
             return
         frame = payload["data"]
         diag = payload["diagnostics"]
@@ -97,11 +134,11 @@ def main():
             pass
 
     def on_application_data(payload):
-        if args.no_metadata:
+        if args.only_application_data:
             return
         xml = payload["data"]
         diag = payload["diagnostics"]
-        print(f"[METADATA] {len(xml)} bytes, diag={diag}")
+        print(f"[APPLICATION DATA] {len(xml)} bytes, diag={diag}")
         print(xml)
 
     def on_session_start(payload):
@@ -113,39 +150,83 @@ def main():
         error_count = payload.get("error_count", 0)
         print(f"[ERROR] {error_type}: {message} (total errors: {error_count})")
 
-    # Create the retriever with appropriate callbacks
-    video_callback = None if args.no_video else on_video_data
-    metadata_callback = None if args.no_metadata else on_application_data
+    # Set up video processing if requested
+    video_processing_fn = None
+    shared_config = None
+    if args.enable_video_processing and not args.only_application_data:
+        video_processing_fn = simple_video_processing_example
+        shared_config = {
+            "brightness_adjustment": args.brightness_adjustment,
+            "frame_count": 0
+        }
+        print(f"[DEMO] Video processing enabled with brightness adjustment: {args.brightness_adjustment}")
 
-    retriever = RtspDataRetriever(
-        rtsp_url=rtsp_url,
-        on_video_data=video_callback,
-        on_application_data=metadata_callback,
-        on_session_start=on_session_start,
-        on_error=on_error,
-        latency=args.latency,
-        connection_timeout=args.connection_timeout,
-        log_level=getattr(logging, args.log_level.upper(), logging.INFO),
-    )
+    # Create the retriever with appropriate callbacks
+    video_callback = None if args.only_application_data else on_video_data
+    application_data_callback = None if args.only_video else on_application_data
+
+    # Choose the appropriate retriever class based on flags
+    if args.only_video:
+        print("[DEMO] Using RtspVideoDataRetriever (video-only retriever)")
+        retriever = RtspVideoDataRetriever(
+            rtsp_url=rtsp_url,
+            on_video_data=video_callback,
+            on_error=on_error,
+            on_session_start=on_session_start,
+            latency=args.latency,
+            video_processing_fn=video_processing_fn,
+            shared_config=shared_config,
+            connection_timeout=args.connection_timeout,
+            log_level=getattr(logging, args.log_level.upper(), logging.INFO),
+        )
+    elif args.only_application_data:
+        print("[DEMO] Using RtspApplicationDataRetriever (application data-only retriever)")
+        retriever = RtspApplicationDataRetriever(
+            rtsp_url=rtsp_url,
+            on_application_data=application_data_callback,
+            on_error=on_error,
+            on_session_start=on_session_start,
+            latency=args.latency,
+            video_processing_fn=video_processing_fn,
+            shared_config=shared_config,
+            connection_timeout=args.connection_timeout,
+            log_level=getattr(logging, args.log_level.upper(), logging.INFO),
+        )
+    else:
+        print("[DEMO] Using RtspDataRetriever (combined video+application data retriever)")
+        retriever = RtspDataRetriever(
+            rtsp_url=rtsp_url,
+            on_video_data=video_callback,
+            on_application_data=application_data_callback,
+            on_session_start=on_session_start,
+            on_error=on_error,
+            latency=args.latency,
+            video_processing_fn=video_processing_fn,
+            shared_config=shared_config,
+            connection_timeout=args.connection_timeout,
+            log_level=getattr(logging, args.log_level.upper(), logging.INFO),
+        )
 
     try:
-        # Use context manager for automatic resource cleanup
-        with retriever:
-            logging.info("RTSP Data Retriever started")
+        if args.manual_lifecycle:
+            print("[DEMO] Using manual lifecycle (start/stop methods)")
+            # Manual lifecycle demonstration
+            retriever.start()
+            logging.info("RTSP Data Retriever started manually")
             print("Press Ctrl+C to stop, or 'q' in video window to quit")
+            
             # Pre-create the video window so visibility checks won't fail
-            if not args.no_video:
+            if not args.only_application_data:
                 try:
                     cv2.namedWindow("Video")
                 except cv2.error as e:  # Window creation failed (e.g. headless)
                     logging.error(f"Unable to create video window: {e}")
-                    args.no_video = True
+                    raise
 
-            # Keep the main thread alive and handle keyboard interrupt
             try:
                 while retriever.is_running:
                     time.sleep(0.01)
-                    if not args.no_video:
+                    if not args.only_application_data:
                         # Display latest frame if available
                         try:
                             frame = video_frames.get_nowait()
@@ -162,11 +243,48 @@ def main():
                             break
             except KeyboardInterrupt:
                 logging.info("Interrupted by user")
+            finally:
+                retriever.stop()  # Manual stop
+        else:
+            print("[DEMO] Using context manager (with statement)")
+            # Use context manager for automatic resource cleanup
+            with retriever:
+                logging.info("RTSP Data Retriever started")
+                print("Press Ctrl+C to stop, or 'q' in video window to quit")
+                # Pre-create the video window so visibility checks won't fail
+                if not args.only_application_data:
+                    try:
+                        cv2.namedWindow("Video")
+                    except cv2.error as e:  # Window creation failed (e.g. headless)
+                        logging.error(f"Unable to create video window: {e}")
+                        raise
+
+                # Keep the main thread alive and handle keyboard interrupt
+                try:
+                    while retriever.is_running:
+                        time.sleep(0.01)
+                        if not args.only_application_data:
+                            # Display latest frame if available
+                            try:
+                                frame = video_frames.get_nowait()
+                                cv2.imshow("Video", frame)
+                            except queue.Empty:
+                                pass
+                            # Close if window was closed or user pressed 'q'
+                            try:
+                                if cv2.getWindowProperty("Video", cv2.WND_PROP_VISIBLE) < 1:
+                                    break
+                                if cv2.waitKey(1) & 0xFF == ord("q"):
+                                    break
+                            except cv2.error:
+                                break
+                except KeyboardInterrupt:
+                    logging.info("Interrupted by user")
     except Exception as e:
         logging.error(f"Error running retriever: {e}")
     finally:
         logging.info("Cleaning up...")
-        if not args.no_video:
+        if not args.only_application_data:
             cv2.destroyAllWindows()
 
 

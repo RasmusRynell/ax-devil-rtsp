@@ -63,5 +63,5 @@ def rtsp_url(rtsp_credentials, dual_stream_rtsp_server):
             rtp_ext=False
         )
     else:
-        # Use the local dual-stream server (video + metadata)
+        # Use the local dual-stream server (video + application data)
         return dual_stream_rtsp_server
