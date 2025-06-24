@@ -2,11 +2,11 @@
 
 <div align="center">
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Type Hints](https://img.shields.io/badge/Type%20Hints-Strict-brightgreen.svg)](https://www.python.org/dev/peps/pep-0484/)
 
-A Python library for handling RTSP streams from Axis cameras. Provides robust video streaming and metadata handling capabilities with both GStreamer and raw socket implementations.
+A Python library for RTSP streaming from Axis cameras with video and metadata support.
 
 See also: [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-api) and [ax-devil-mqtt](https://github.com/rasmusrynell/ax-devil-mqtt) for other Axis device management tools.
 
@@ -17,9 +17,10 @@ See also: [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-
 ## 📋 Contents
 
 - [Feature Overview](#-feature-overview)
+- [Installation](#-installation)
 - [Quick Start](#-quick-start)
-- [Usage Examples](#-usage-examples)
-- [Disclaimer](#-disclaimer)
+- [Testing](#-testing)
+- [Development Setup](#-development-setup)
 - [License](#-license)
 
 ---
@@ -32,38 +33,44 @@ See also: [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-
       <th>Feature</th>
       <th>Description</th>
       <th align="center">Python API</th>
-      <th align="center">CLI Tool</th>
+      <th align="center">CLI Usage</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td><b>📹 Video Streaming</b></td>
-      <td>High-performance RTSP video streaming with GStreamer</td>
-      <td align="center"><code>VideoGStreamerClient</code></td>
-      <td align="center"><a href="#video-cli">ax-devil-rtsp video</a></td>
+      <td><b>🔄 Combined Streaming</b></td>
+      <td>Simultaneous video and metadata streaming (default)</td>
+      <td align="center"><code>RtspDataRetriever</code></td>
+      <td align="center">Default behavior</td>
     </tr>
     <tr>
-      <td><b>📊 Scene Metadata (GStreamer)</b></td>
-      <td>GStreamer-based metadata streaming with RTP packet handling</td>
-      <td align="center"><code>SceneMetadataClient</code></td>
-      <td align="center"><a href="#metadata-gst-cli">ax-devil-rtsp metadata-gst</a></td>
+      <td><b>📹 Video Only</b></td>
+      <td>Stream video frames without metadata</td>
+      <td align="center"><code>RtspVideoDataRetriever</code></td>
+      <td align="center"><code>--no-metadata</code></td>
     </tr>
     <tr>
-      <td><b>🔄 Scene Metadata (Raw)</b></td>
-      <td>Raw socket implementation for metadata streaming</td>
-      <td align="center"><code>SceneMetadataRawClient</code></td>
-      <td align="center"><a href="#metadata-raw-cli">ax-devil-rtsp metadata-raw</a></td>
+      <td><b>📊 Metadata Only</b></td>
+      <td>Stream scene metadata without video</td>
+      <td align="center"><code>RtspApplicationDataRetriever</code></td>
+      <td align="center"><code>--no-video</code></td>
     </tr>
     <tr>
       <td><b>⚡ Real-time Processing</b></td>
       <td>Frame-by-frame processing with custom callbacks</td>
-      <td align="center"><code>frame_handler_callback</code></td>
+      <td align="center"><code>on_video_data</code></td>
       <td align="center">N/A</td>
     </tr>
     <tr>
       <td><b>🎯 RTP Extension Data</b></td>
-      <td>Access to ONVIF RTP extension data and timing information</td>
-      <td align="center"><code>latest_rtp_data</code></td>
+      <td>Access to ONVIF RTP extension data and timing information (enabled by default)</td>
+      <td align="center"><code>rtp_ext=True</code></td>
+      <td align="center">Default enabled</td>
+    </tr>
+    <tr>
+      <td><b>🛠️ Axis URL Builder</b></td>
+      <td>Utility for constructing Axis-compatible RTSP URLs</td>
+      <td align="center"><code>build_axis_rtsp_url</code></td>
       <td align="center">N/A</td>
     </tr>
   </tbody>
@@ -71,141 +78,156 @@ See also: [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-
 
 ---
 
-## 🚀 Quick Start
-
-### Installation
+## 📦 Installation
 
 ```bash
 pip install ax-devil-rtsp
 ```
 
-### Environment Variables
-For an easier experience, you can set the following environment variables:
-```bash
-export AX_DEVIL_TARGET_ADDR=<device-ip>
-export AX_DEVIL_TARGET_USER=<username>
-export AX_DEVIL_TARGET_PASS=<password>
-export AX_DEVIL_USAGE_CLI="safe" # Set to "unsafe" to skip SSL certificate verification for CLI calls
-```
-
 ---
 
-## 💻 Usage Examples
+## 🚀 Quick Start
 
-### Python API Usage
+### Python API
 
 ```python
-import json
-from ax_devil_rtsp import VideoGStreamerClient, SceneMetadataClient
+from ax_devil_rtsp import RtspDataRetriever, build_axis_rtsp_url
 
-# Video Streaming Example
-def frame_callback(frame, rtp_info):
-    if rtp_info:
-        print(f"Frame timestamp: {rtp_info['human_time']}")
-    # Process frame using OpenCV/NumPy as needed
+# Define callback functions
+def on_video_data(payload):
+    frame = payload["data"]
+    diagnostics = payload["diagnostics"]
+    print(f"Video frame: {frame.shape}, {diagnostics}")
 
-# Initialize video client with context manager
-rtsp_url = "rtsp://username:password@192.168.1.90/axis-media/media.amp"
-client = VideoGStreamerClient(rtsp_url, latency=100, frame_handler_callback=frame_callback)
-client.start()  # Starts streaming in current thread
+def on_metadata(payload):
+    xml_data = payload["data"]
+    diagnostics = payload["diagnostics"]
+    print(f"Metadata: {len(xml_data)} bytes, {diagnostics}")
 
-# Metadata Streaming Example
-def metadata_callback(xml_text):
-    print(f"Received metadata: {xml_text[:100]}...")  # Print first 100 chars
+def on_error(payload):
+    print(f"Error: {payload['message']}")
 
-# Initialize metadata client
-metadata_url = "rtsp://username:password@192.168.1.90/axis-media/media.amp?analytics=1"
-metadata_client = SceneMetadataClient(metadata_url, 
-                                    latency=100,
-                                    raw_data_callback=metadata_callback)
-metadata_client.start()  # Starts streaming in current thread
+# Option 1: Direct RTSP URL
+rtsp_url = "rtsp://username:password@192.168.1.90/axis-media/media.amp?analytics=1"
+retriever = RtspDataRetriever(
+    rtsp_url=rtsp_url,
+    on_video_data=on_video_data,
+    on_application_data=on_metadata,
+    on_error=on_error,
+    latency=100
+)
+
+# Use context manager for automatic cleanup
+with retriever:
+    print("Streaming... Press Ctrl+C to stop")
+    # Keep running until interrupted
+
+# Option 2: Build Axis-style URL
+axis_url = build_axis_rtsp_url(
+    ip="192.168.1.90",
+    username="username", 
+    password="password",
+    video_source=1,
+    get_video_data=True,
+    get_application_data=True,
+    rtp_ext=True,  # Enable RTP extension (default: True)
+    resolution="640x480"
+)
+
+# Video-only retriever
+from ax_devil_rtsp import RtspVideoDataRetriever
+video_retriever = RtspVideoDataRetriever(axis_url, on_video_data=on_video_data)
 ```
 
-### CLI Usage Examples
+### CLI Usage
 
-<details open>
-<summary><a name="video-cli"></a><b>📹 Video Streaming</b></summary>
-<p>
+**Basic Usage (streams both video and metadata):**
+```bash
+ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret
+```
+
+**Common Options:**
+```bash
+# Custom resolution and quality
+ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret \
+  --resolution 1280x720 --latency 50
+
+# Different camera source
+ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --source 2
+
+# Use a complete RTSP URL
+ax-devil-rtsp --rtsp-url "rtsp://admin:secret@192.168.1.90/axis-media/media.amp?analytics=1"
+```
+
+**Specialized Modes:**
+```bash
+# Video only (no metadata overlay)
+ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --no-metadata
+
+# Metadata only (no video window)  
+ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --no-video
+```
+
+### Environment Variables (Optional)
 
 ```bash
-# Display video stream in window at INFO level (default)
-ax-devil-rtsp video --ip 192.168.1.90 --username admin --password secret
-
-# Show only warnings and errors
-ax-devil-rtsp video --ip 192.168.1.90 --log-level WARNING
+export AX_DEVIL_TARGET_ADDR=192.168.1.90
+export AX_DEVIL_TARGET_USER=admin
+export AX_DEVIL_TARGET_PASS=secret
 ```
-</p>
-</details>
-
-<details>
-<summary><a name="metadata-gst-cli"></a><b>📊 Scene Metadata (GStreamer)</b></summary>
-<p>
-
-```bash
-ax-devil-rtsp metadata --ip 192.168.1.90 --username admin --password secret
-```
-</p>
-</details>
 
 ---
 
-## 🧪 Running Tests
+## 🧪 Testing
 
-#### Unit Tests
 ```bash
-# Run all unit tests - no network dependencies
+# Unit tests
 pytest tests/unit/ -v
 
-# Run specific unit test file
-pytest tests/unit/test_cli.py -v
-```
-
-#### Integration Tests  
-```bash
-# Local development mode (uses GStreamer test servers)
+# Integration tests (local test servers)
 pytest tests/integration/ -v
 
-# Real camera mode (uses actual hardware)
-USE_REAL_CAMERA=true \
-AX_DEVIL_TARGET_ADDR=192.168.1.81 \
-AX_DEVIL_TARGET_USER=root \
-AX_DEVIL_TARGET_PASS=fusion \
-pytest tests/integration/ -v
-
-# Run specific integration test file
-pytest tests/integration/test_video_gstreamer.py -v
+# Integration tests (real camera)
+USE_REAL_CAMERA=true AX_DEVIL_TARGET_ADDR=192.168.1.90 pytest tests/integration/ -v
 ```
 
-#### All Tests
+---
+
+## 🛠️ Development Setup
+
+### System Requirements
+
+**Linux (Ubuntu/Debian):**
 ```bash
-# Local mode (unit + integration with test servers)
-pytest tests/ -v
-
-# Real camera mode (unit + integration with real camera)
-USE_REAL_CAMERA=true pytest tests/ -v
-
-# GStreamer tests only
-pytest -m "requires_gstreamer" -v
+sudo apt-get update && sudo apt-get install -y \
+  libgirepository-2.0-dev gobject-introspection libcairo2-dev libffi-dev pkg-config gcc libglib2.0-dev \
+  gstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools \
+  gstreamer1.0-rtsp libgstrtspserver-1.0-0 \
+  gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gir1.2-gst-rtsp-server-1.0
 ```
 
-### Test Environment Variables
+### Python Environment
 
-- **`USE_REAL_CAMERA`**: `true` to use real cameras, `false` for test servers
-- **`AX_DEVIL_TARGET_ADDR`**: Real camera IP address
-- **`AX_DEVIL_TARGET_USER`**: Camera username  
-- **`AX_DEVIL_TARGET_PASS`**: Camera password
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+```
 
-> **Note:** Integration tests fail naturally if they cannot connect to the provided RTSP URL, regardless of whether it's a test server or real camera.
+### Helper Scripts
 
+- `tools/install_dependencies.sh`: Automated system and Python dependency installation (Ubuntu/Debian)
+- `tools/check_dependencies.py`: Verify all dependencies are properly installed
 
-> **Note:** For more CLI examples and detailed API documentation, check the [examples directory](src/ax_devil_rtsp/examples) in the source code.
+---
+
+## 📄 License
+
+MIT License - See LICENSE file for details.
 
 ---
 
 ## ⚠️ Disclaimer
 
-This project is an independent, community-driven implementation and is **not** affiliated with or endorsed by Axis Communications AB. For official APIs and development resources, please refer to [Axis Developer Community](https://www.axis.com/en-us/developer).
-
-## 📄 License
-
-MIT License - See LICENSE file for details.
+This project is independent and not affiliated with Axis Communications AB. For official resources, visit [Axis developer documentation](https://developer.axis.com/).

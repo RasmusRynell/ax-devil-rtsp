@@ -1,6 +1,6 @@
 #!/bin/bash
 # Complete installation script for ax-devil-rtsp
-# Based on analysis of .github/workflows/publish.yml, pyproject.toml, and check_dependencies.py
+# Based on analysis of .github/workflows/publish.yml, pyproject.toml, and tools/check_dependencies.py
 
 echo "🔧 Setting up ax-devil-rtsp development environment..."
 
@@ -83,7 +83,7 @@ pip install -e .[dev]
 
 # Verify installation
 echo "🔍 Verifying installation..."
-python check_dependencies.py
+python tools/check_dependencies.py
 
 echo "✅ Installation complete!"
 echo ""

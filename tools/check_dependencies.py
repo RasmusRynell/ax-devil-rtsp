@@ -6,7 +6,7 @@ This script verifies that all required dependencies are properly installed
 and can be imported. Useful for debugging CI/local environment issues.
 
 Usage:
-    python check_dependencies.py
+    python tools/check_dependencies.py
 """
 
 import sys
