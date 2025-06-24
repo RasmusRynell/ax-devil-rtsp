@@ -4,6 +4,8 @@ import logging
 import cv2
 import time
 import sys
+import queue
+import numpy as np
 
 from ..rtsp_data_retrievers import RtspDataRetriever
 from ..utils import build_axis_rtsp_url
@@ -55,16 +57,20 @@ def main():
     print(f"Starting stream on {rtsp_url=}")
 
     # Callback functions for handling different data types
+    # Queue for transferring frames to the main thread
+    video_frames: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=1)
+
     def on_video_data(payload):
         if args.no_video:
             return
         frame = payload["data"]
         diag = payload["diagnostics"]
         print(f"[VIDEO] frame shape={frame.shape}, diag={diag}")
-        cv2.imshow("Video", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            # Signal to stop (we'll handle this in the main loop)
-            return
+        try:
+            video_frames.put_nowait(frame)
+        except queue.Full:
+            # Drop frame if the display thread is lagging
+            pass
 
     def on_application_data(payload):
         if args.no_metadata:
@@ -102,14 +108,34 @@ def main():
         with retriever:
             logging.info("RTSP Data Retriever started")
             print("Press Ctrl+C to stop, or 'q' in video window to quit")
-            
+
+            # Pre-create the video window so visibility checks won't fail
+            if not args.no_video:
+                try:
+                    cv2.namedWindow("Video")
+                except cv2.error as e:  # Window creation failed (e.g. headless)
+                    logging.error(f"Unable to create video window: {e}")
+                    args.no_video = True
+
             # Keep the main thread alive and handle keyboard interrupt
             try:
                 while retriever.is_running:
-                    time.sleep(0.1)
-                    # Check if OpenCV window was closed (if video is enabled)
-                    if not args.no_video and cv2.getWindowProperty("Video", cv2.WND_PROP_VISIBLE) < 1:
-                        break
+                    time.sleep(0.01)
+                    if not args.no_video:
+                        # Display latest frame if available
+                        try:
+                            frame = video_frames.get_nowait()
+                            cv2.imshow("Video", frame)
+                        except queue.Empty:
+                            pass
+                        # Close if window was closed or user pressed 'q'
+                        try:
+                            if cv2.getWindowProperty("Video", cv2.WND_PROP_VISIBLE) < 1:
+                                break
+                            if cv2.waitKey(1) & 0xFF == ord("q"):
+                                break
+                        except cv2.error:
+                            break
             except KeyboardInterrupt:
                 logging.info("Interrupted by user")
                 
