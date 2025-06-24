@@ -15,18 +15,42 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="CLI for RTSP Data Retriever (video, metadata, RTP extension, session metadata)"
     )
-    parser.add_argument("--ip", help="Camera IP address (required unless --rtsp-url provided)")
+    parser.add_argument(
+        "--ip", help="Camera IP address (required unless --rtsp-url provided)"
+    )
     parser.add_argument("--username", default="", help="Device username")
     parser.add_argument("--password", default="", help="Device password")
-    parser.add_argument("--source", default="1", help="What device \"source\"/\"camera head\" to use")
+    parser.add_argument(
+        "--source", default="1", help='What device "source"/"camera head" to use'
+    )
     parser.add_argument("--latency", type=int, default=100, help="RTSP latency in ms")
-    parser.add_argument("--no-video", action="store_true", help="Disable video frames", default=False)
-    parser.add_argument("--no-metadata", action="store_true", help="Disable metadata XML", default=False)
-    parser.add_argument("--rtp-ext", action="store_true", help="Enable RTP extension", default=True)
-    parser.add_argument("--rtsp-url", help="Full RTSP URL, overrides all other arguments")
-    parser.add_argument("--log-level", default="INFO", help="Logging level")
-    parser.add_argument("--connection-timeout", type=int, default=30, help="Connection timeout in seconds")
-    parser.add_argument("--resolution", default="500x500", help="Video resolution (e.g. 1280x720)")
+    parser.add_argument(
+        "--no-video", action="store_true", help="Disable video frames", default=False
+    )
+    parser.add_argument(
+        "--no-metadata", action="store_true", help="Disable metadata XML", default=False
+    )
+    parser.add_argument(
+        "--rtp-ext", action="store_true", help="Enable RTP extension", default=True
+    )
+    parser.add_argument(
+        "--rtsp-url", help="Full RTSP URL, overrides all other arguments"
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Logging verbosity",
+    )
+    parser.add_argument(
+        "--connection-timeout",
+        type=int,
+        default=30,
+        help="Connection timeout in seconds",
+    )
+    parser.add_argument(
+        "--resolution", default=None, help="Video resolution (e.g. 1280x720 or 500x500) (default: None, lets device decide)"
+    )
     return parser.parse_args()
 
 
@@ -36,7 +60,7 @@ def main():
         level=getattr(logging, args.log_level.upper(), logging.INFO),
         format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s",
     )
-    
+
     if args.rtsp_url:
         rtsp_url = args.rtsp_url
     else:
@@ -101,6 +125,7 @@ def main():
         on_error=on_error,
         latency=args.latency,
         connection_timeout=args.connection_timeout,
+        log_level=getattr(logging, args.log_level.upper(), logging.INFO),
     )
 
     try:
@@ -108,7 +133,6 @@ def main():
         with retriever:
             logging.info("RTSP Data Retriever started")
             print("Press Ctrl+C to stop, or 'q' in video window to quit")
-
             # Pre-create the video window so visibility checks won't fail
             if not args.no_video:
                 try:
@@ -138,7 +162,6 @@ def main():
                             break
             except KeyboardInterrupt:
                 logging.info("Interrupted by user")
-                
     except Exception as e:
         logging.error(f"Error running retriever: {e}")
     finally:
