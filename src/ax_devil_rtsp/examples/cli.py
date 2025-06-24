@@ -47,7 +47,7 @@ def parse_args():
     parser.add_argument(
         "--source", default="1", help='What device "source"/"camera head" to use'
     )
-    parser.add_argument("--latency", type=int, default=100, help="RTSP latency in ms")
+    parser.add_argument("--latency", type=int, default=100, help="RTSP latency in ms (to gather out of order packets)")
     parser.add_argument(
         "--only-video", action="store_true", help="Enable only video frames (disable application data) - demonstrates RtspVideoDataRetriever", default=False
     )
@@ -97,6 +97,7 @@ def main():
         level=getattr(logging, args.log_level.upper(), logging.INFO),
         format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s",
     )
+    logging.info(f"Starting with args: {args}")
 
     if args.rtsp_url:
         rtsp_url = args.rtsp_url
@@ -115,7 +116,7 @@ def main():
         except ValueError as e:
             logging.error(e)
             sys.exit(1)
-    print(f"Starting stream on {rtsp_url=}")
+    logging.info(f"Starting stream on {rtsp_url=}")
 
     # Callback functions for handling different data types
     # Queue for transferring frames to the main thread
@@ -126,7 +127,6 @@ def main():
             return
         frame = payload["data"]
         diag = payload["diagnostics"]
-        print(f"[VIDEO] frame shape={frame.shape}, diag={diag}")
         try:
             video_frames.put_nowait(frame)
         except queue.Full:
@@ -134,21 +134,21 @@ def main():
             pass
 
     def on_application_data(payload):
-        if args.only_application_data:
+        if args.only_video:
             return
         xml = payload["data"]
         diag = payload["diagnostics"]
-        print(f"[APPLICATION DATA] {len(xml)} bytes, diag={diag}")
-        print(xml)
+        logging.info(f"[APPLICATION DATA] {len(xml)} bytes, diag={diag}")
+        logging.info(xml)
 
     def on_session_start(payload):
-        print(f"[SESSION METADATA] {payload}")
+        logging.info(f"[SESSION METADATA] {payload}")
 
     def on_error(payload):
         error_type = payload.get("error_type", "Unknown")
         message = payload.get("message", "Unknown error")
         error_count = payload.get("error_count", 0)
-        print(f"[ERROR] {error_type}: {message} (total errors: {error_count})")
+        logging.error(f"[ERROR] {error_type}: {message} (total errors: {error_count})")
 
     # Set up video processing if requested
     video_processing_fn = None
@@ -159,7 +159,7 @@ def main():
             "brightness_adjustment": args.brightness_adjustment,
             "frame_count": 0
         }
-        print(f"[DEMO] Video processing enabled with brightness adjustment: {args.brightness_adjustment}")
+        logging.info(f"[DEMO] Video processing enabled with brightness adjustment: {args.brightness_adjustment}")
 
     # Create the retriever with appropriate callbacks
     video_callback = None if args.only_application_data else on_video_data
@@ -167,7 +167,7 @@ def main():
 
     # Choose the appropriate retriever class based on flags
     if args.only_video:
-        print("[DEMO] Using RtspVideoDataRetriever (video-only retriever)")
+        logging.info("[DEMO] Using RtspVideoDataRetriever (video-only retriever)")
         retriever = RtspVideoDataRetriever(
             rtsp_url=rtsp_url,
             on_video_data=video_callback,
@@ -180,7 +180,7 @@ def main():
             log_level=getattr(logging, args.log_level.upper(), logging.INFO),
         )
     elif args.only_application_data:
-        print("[DEMO] Using RtspApplicationDataRetriever (application data-only retriever)")
+        logging.info("[DEMO] Using RtspApplicationDataRetriever (application data-only retriever)")
         retriever = RtspApplicationDataRetriever(
             rtsp_url=rtsp_url,
             on_application_data=application_data_callback,
@@ -193,7 +193,7 @@ def main():
             log_level=getattr(logging, args.log_level.upper(), logging.INFO),
         )
     else:
-        print("[DEMO] Using RtspDataRetriever (combined video+application data retriever)")
+        logging.info("[DEMO] Using RtspDataRetriever (combined video+application data retriever)")
         retriever = RtspDataRetriever(
             rtsp_url=rtsp_url,
             on_video_data=video_callback,
@@ -209,11 +209,11 @@ def main():
 
     try:
         if args.manual_lifecycle:
-            print("[DEMO] Using manual lifecycle (start/stop methods)")
+            logging.info("[DEMO] Using manual lifecycle (start/stop methods)")
             # Manual lifecycle demonstration
             retriever.start()
             logging.info("RTSP Data Retriever started manually")
-            print("Press Ctrl+C to stop, or 'q' in video window to quit")
+            logging.info("Press Ctrl+C to stop, or 'q' in video window to quit")
             
             # Pre-create the video window so visibility checks won't fail
             if not args.only_application_data:
@@ -246,11 +246,11 @@ def main():
             finally:
                 retriever.stop()  # Manual stop
         else:
-            print("[DEMO] Using context manager (with statement)")
+            logging.info("[DEMO] Using context manager (with statement)")
             # Use context manager for automatic resource cleanup
             with retriever:
                 logging.info("RTSP Data Retriever started")
-                print("Press Ctrl+C to stop, or 'q' in video window to quit")
+                logging.info("Press Ctrl+C to stop, or 'q' in video window to quit")
                 # Pre-create the video window so visibility checks won't fail
                 if not args.only_application_data:
                     try:

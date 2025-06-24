@@ -143,9 +143,9 @@ ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret
 
 **Common Options:**
 ```bash
-# Custom resolution and quality
+# Custom resolution
 ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret \
-  --resolution 1280x720 --latency 50
+  --resolution 1280x720
 
 # Different camera source
 ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --source 2
