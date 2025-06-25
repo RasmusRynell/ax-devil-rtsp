@@ -54,7 +54,7 @@ jobs:
 
       - name: Check dependencies
         run: |
-          python check_dependencies.py
+          python tools/check_dependencies.py
 
       - name: Run tests
         run: |

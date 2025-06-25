@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
-import time
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
 import cv2
 import gi
 import numpy as np
+import sys
 
 from .utils import parse_session_metadata
 
@@ -17,6 +18,17 @@ gi.require_version("Gst", "1.0")
 gi.require_version("GstRtp", "1.0")
 gi.require_version("GstRtsp", "1.0")
 from gi.repository import Gst, GstRtp, GLib, GstRtsp
+
+# Configure basic logging only when run as a standalone script. When this
+# module is imported (e.g. through the high level retrievers) logging should
+# be configured by the parent application so that options like `--log-level`
+# work as expected.
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        stream=sys.stdout,
+    )
 
 logger = logging.getLogger("ax-devil-rtsp.CombinedRTSPClient")
 
@@ -37,7 +49,7 @@ def _to_rgb_array(info: Gst.MapInfo, width: int, height: int, fmt: str) -> np.nd
 
 
 class CombinedRTSPClient:
-    """Unified RTSP client with video and metadata callbacks."""
+    """Unified RTSP client with video and application data callbacks."""
 
     def __init__(
         self,
@@ -45,8 +57,8 @@ class CombinedRTSPClient:
         *,
         latency: int = 100,
         video_frame_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        metadata_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        session_metadata_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        application_data_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        session_application_data_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         error_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         video_processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
         shared_config: Optional[dict] = None,
@@ -55,23 +67,17 @@ class CombinedRTSPClient:
         self.rtsp_url = rtsp_url
         self.latency = latency
         self.video_frame_cb = video_frame_callback
-        self.metadata_cb = metadata_callback
-        self.session_md_cb = session_metadata_callback
+        self.application_data_cb = application_data_callback
+        self.session_md_cb = session_application_data_callback
         self.error_cb = error_callback
         self.video_proc_fn = video_processing_fn
         self.shared_cfg = shared_config or {}
-        self.timeout = timeout
-
-        # Thread control
-        self._loop_thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
-        self._timer: Optional[threading.Timer] = None
 
         # Diagnostic counters and state
         self.start_time: Optional[float] = None
         self.err_cnt = 0
         self.video_cnt = 0
-        self.meta_cnt = 0
+        self.application_data_cnt = 0
         self.xml_cnt = 0
         self.latest_rtp_data: Optional[Dict[str, Any]] = None
         self._xml_acc: bytes = b""
@@ -89,15 +95,20 @@ class CombinedRTSPClient:
         self._setup_elements()
         self._setup_bus()
 
+        self._timeout = timeout
+        self._timer: Optional[None | threading.Timer] = None
+
     def _setup_elements(self) -> None:
-        """Build video and metadata branches of the pipeline."""
+        logger.debug("Setting up pipeline elements")
         self._create_rtspsrc()
         self._create_video_branch()
-        self.meta_branch_built = False
+        self.application_data_branch_built = False
 
     def _create_rtspsrc(self) -> None:
+        logger.debug("Creating rtspsrc element")
         src = Gst.ElementFactory.make("rtspsrc", "src")
         if not src:
+            logger.error("Unable to create rtspsrc element")
             raise RuntimeError("Unable to create rtspsrc element")
         src.props.location = self.rtsp_url
         src.props.latency = self.latency
@@ -107,16 +118,18 @@ class CombinedRTSPClient:
         # Be stricter about timeout handling
         src.props.tcp_timeout = 100_000_000     # µs until we declare the server dead
 
-        # Axis metadata streams sometimes arrive late; delay EOS
+        # 'Axis Scene Description' (the application data) streams sometimes arrive late; delay EOS
         src.props.drop_on_latency = False
 
         src.connect("pad-added", self._on_pad_added)
         src.connect("notify::sdes", self._on_sdes_notify)
         self.pipeline.add(src)
         self.src = src
+        logger.debug("rtspsrc element created and added to pipeline")
 
     def _create_video_branch(self) -> None:
         """Add and link video depay, parser, decoder, converter, and appsink."""
+        logger.debug("Creating video branch elements")
         elems = {
             'v_depay': Gst.ElementFactory.make("rtph264depay", "v_depay"),
             'v_parse': Gst.ElementFactory.make("h264parse", "v_parse"),
@@ -145,36 +158,38 @@ class CombinedRTSPClient:
         pad = elems['v_depay'].get_static_pad('sink')
         pad.add_probe(Gst.PadProbeType.BUFFER, self._rtp_probe)
         self.v_depay = elems['v_depay']
+        logger.debug("Video branch elements created and linked")
 
-    def _ensure_meta_branch(self) -> None:
-        """Lazily build metadata branch on demand."""
-        if self.meta_branch_built:
+    def _ensure_application_data_branch(self) -> None:
+        """Lazily build application data branch on demand."""
+        if self.application_data_branch_built:
             return
 
+        logger.debug("Creating application data branch elements")
         m_jit = Gst.ElementFactory.make("rtpjitterbuffer", "m_jit")
         m_caps = Gst.ElementFactory.make("capsfilter", "m_caps")
         m_sink = Gst.ElementFactory.make("appsink", "m_sink")
         if not all((m_jit, m_caps, m_sink)):
-            self._report_error("Metadata Branch", "Failed to create metadata pipeline elements")
+            self._report_error("Application Data Branch", "Failed to create application data pipeline elements")
             return
 
         m_jit.props.latency = self.latency
         m_caps.props.caps = Gst.Caps.from_string("application/x-rtp,media=application")
         m_sink.props.emit_signals = True
         m_sink.props.sync = False
-        m_sink.connect("new-sample", self._on_new_meta_sample)
+        m_sink.connect("new-sample", self._on_new_application_data_sample)
 
         for el in (m_jit, m_caps, m_sink):
             self.pipeline.add(el)
             el.sync_state_with_parent()
 
         if not (m_jit.link(m_caps) and m_caps.link(m_sink)):
-            self._report_error("Metadata Branch", "Failed to link metadata pipeline elements")
+            self._report_error("Application Data Branch", "Failed to link application data pipeline elements")
             return
 
         self.m_jit = m_jit
-        self.meta_branch_built = True
-        logger.info("Metadata branch created")
+        self.application_data_branch_built = True
+        logger.info("Application data branch created")
 
     def _setup_bus(self) -> None:
         bus = self.pipeline.get_bus()
@@ -184,15 +199,14 @@ class CombinedRTSPClient:
     def _on_bus_message(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
         if msg.type == Gst.MessageType.EOS:
             logger.info("EOS received")
-            GLib.idle_add(self.stop)
+            self.stop()
         elif msg.type == Gst.MessageType.ERROR:
             err, dbg = msg.parse_error()
             self._report_error("GStreamer Error", f"{err.message} | {dbg}")
-            # Stop on error to prevent hanging - use idle_add to avoid thread join issue
-            GLib.idle_add(self.stop)
 
     def _on_pad_added(self, _src: Gst.Element, pad: Gst.Pad) -> None:
         caps = pad.get_current_caps()
+        logger.debug(f"Pad added: {pad.get_name()}, caps: {caps.to_string() if caps else 'None'}")
         if not caps:
             return
         struct = caps.get_structure(0)
@@ -201,7 +215,7 @@ class CombinedRTSPClient:
 
         media = struct.get_string("media") or ""
         if media.lower() == "application":
-            self._ensure_meta_branch()
+            self._ensure_application_data_branch()
             sink_pad = self.m_jit.get_static_pad('sink')
         else:
             sink_pad = self.v_depay.get_static_pad('sink')
@@ -266,6 +280,7 @@ class CombinedRTSPClient:
         return Gst.PadProbeReturn.OK
 
     def _on_new_video_sample(self, sink: Gst.Element) -> Gst.FlowReturn:
+        logger.debug("Received new video sample")
         self._timers['vid_sample'] = time.time()
         sample = sink.emit('pull-sample')
         if not sample:
@@ -306,6 +321,7 @@ class CombinedRTSPClient:
             'diagnostics': self._video_diag()
         }
         if self.video_frame_cb:
+            logger.debug(f"Calling video_frame_cb (count={self.video_cnt})")
             start = time.time()
             try:
                 self.video_frame_cb(payload)
@@ -315,21 +331,23 @@ class CombinedRTSPClient:
 
         return Gst.FlowReturn.OK
 
-    def _on_new_meta_sample(self, sink: Gst.Element) -> Gst.FlowReturn:
+    def _on_new_application_data_sample(self, sink: Gst.Element) -> Gst.FlowReturn:
+        logger.debug("Received new application data sample")
         sample = sink.emit('pull-sample')
         if not sample:
-            self._report_error("Metadata Sample", "No sample received from metadata sink")
+            self._report_error("Application Data Sample", "No sample received from application data sink")
             return Gst.FlowReturn.ERROR
-        self.meta_cnt += 1
+        self.application_data_cnt += 1
 
         buf = sample.get_buffer()
         ok, info = _map_buffer(buf)
         if not ok:
-            self._report_error("Metadata Buffer", "Failed to map metadata buffer")
+            self._report_error("Application Data Buffer", "Failed to map application data buffer")
             return Gst.FlowReturn.ERROR
 
-        # Copy the data before unmapping the buffer, 
-        # TODO: performance improvement possible by not copying
+        if self._timer is not None:
+            self._timer.cancel()
+
         raw = bytes(info.data)
         buf.unmap(info)
 
@@ -362,12 +380,13 @@ class CombinedRTSPClient:
 
         self.xml_cnt += 1
         self._xml_acc = b""
-        payload = {'data': xml, 'diagnostics': self._meta_diag()}
-        if self.metadata_cb:
+        payload = {'data': xml, 'diagnostics': self._application_data_diag()}
+        if self.application_data_cb:
+            logger.debug(f"Calling application_data_cb (count={self.application_data_cnt})")
             try:
-                self.metadata_cb(payload)
+                self.application_data_cb(payload)
             except Exception as e:
-                self._report_error("Metadata Callback", f"Metadata callback failed: {e}", e)
+                self._report_error("Application Data Callback", f"Application data callback failed: {e}", e)
         return Gst.FlowReturn.OK
 
     def _video_diag(self) -> Dict[str, Any]:
@@ -381,9 +400,9 @@ class CombinedRTSPClient:
             'uptime': (time.time() - self.start_time) if self.start_time else 0
         }
 
-    def _meta_diag(self) -> Dict[str, Any]:
+    def _application_data_diag(self) -> Dict[str, Any]:
         return {
-            'metadata_sample_count': self.meta_cnt,
+            'application_data_sample_count': self.application_data_cnt,
             'xml_message_count': self.xml_cnt,
             'error_count': self.err_cnt,
             'uptime': (time.time() - self.start_time) if self.start_time else 0
@@ -392,7 +411,7 @@ class CombinedRTSPClient:
     def _report_error(self, error_type: str, message: str, exception: Optional[Exception] = None) -> None:
         """Report an error through logging, counting, and callback."""
         self.err_cnt += 1
-        logger.debug(f"gstreamer_data_grabber got error: {error_type}: {message}")
+        logger.error(f"gstreamer_data_grabber got error: {error_type}: {message}")
         
         if self.error_cb:
             error_payload = {
@@ -408,68 +427,41 @@ class CombinedRTSPClient:
             except Exception as cb_error:
                 logger.error("Error callback failed: %s", cb_error)
 
-    def _run_loop(self) -> None:
-        """Run the GStreamer main loop in a separate thread."""
-        try:
-            self.loop.run()
-        except Exception as e:
-            self._report_error("Main Loop", f"Main loop error: {e}", e)
-        finally:
-            logger.debug("GStreamer main loop exited")
+    def _timeout_handler(self) -> None:
+        """Handle timeout by stopping client."""
+        logger.warning(f"Timeout reached ({self._timeout}s), stopping client")
+        self._report_error("Timeout", f"Connection timed out in {self._timeout}s")
+        self.stop()
 
     def start(self) -> None:
-        """Start the GStreamer pipeline and main loop in a separate thread."""
+        """Start the GStreamer pipeline and main loop."""
         logger.info("Starting CombinedRTSPClient")
         self.start_time = time.time()
-        
-        # Start pipeline
-        state_ret = self.pipeline.set_state(Gst.State.PLAYING)
-        if state_ret == Gst.StateChangeReturn.FAILURE:
+        logger.debug("Setting pipeline state to PLAYING")
+        if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+            logger.error("Unable to set pipeline to PLAYING state")
             raise RuntimeError("Unable to set pipeline to PLAYING state")
-        
-        # Start main loop in separate thread
-        self._stop_event.clear()
-        self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
-        self._loop_thread.start()
-        
-        # Handle timeout if specified
-        if self.timeout:
-            self._timer = threading.Timer(self.timeout, self._timeout_handler)
-            self._timer.daemon = True
-            self._timer.start()
-
-    def _timeout_handler(self) -> None:
-        """Handle timeout by stopping the client."""
-        if not self._stop_event.is_set():
-            logger.warning(f"Timeout reached ({self.timeout}s), stopping client")
-            self._report_error("Timeout", f"Client timed out after {self.timeout} seconds")
+        try:
+            if self._timeout:
+                self._timer = threading.Timer(self._timeout, self._timeout_handler)
+                self._timer.start()
+            logger.debug("Starting main loop")
+            self.loop.run()
+            logger.debug("Main loop exited")
+        except Exception as e:
+            self._report_error("Main Loop", f"Main loop error: {e}", e)
             self.stop()
+        finally:
+            logger.debug("CombinedRTSPClient.start() exiting")
 
     def stop(self) -> None:
         """Stop the GStreamer pipeline and quit the loop."""
-        if self._stop_event.is_set():
-            return  # Already stopping
-            
         logger.info("Stopping CombinedRTSPClient")
-        self._stop_event.set()
-        
-        # Cancel timeout timer if it exists
-        if self._timer:
-            self._timer.cancel()
-            self._timer = None
-        
-        # Stop pipeline
+        logger.debug("Setting pipeline state to NULL")
         self.pipeline.set_state(Gst.State.NULL)
-        
-        # Quit main loop
         if self.loop.is_running():
+            logger.debug("Quitting main loop")
             self.loop.quit()
-        
-        # Wait for loop thread to finish
-        if self._loop_thread and self._loop_thread.is_alive():
-            self._loop_thread.join(timeout=1.0)
-            if self._loop_thread.is_alive():
-                logger.warning("Main loop thread did not exit cleanly")
 
     def __enter__(self) -> CombinedRTSPClient:
         self.start()
@@ -486,7 +478,6 @@ def run_combined_client_simple_example(
     queue: Optional[mp.Queue] = None,
     video_processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
     shared_config: Optional[dict] = None,
-    timeout: Optional[float] = 30.0,
 ) -> None:
     """Example runner: spawns client and logs or queues payloads."""
     def vid_cb(pl: dict) -> None:
@@ -495,9 +486,9 @@ def run_combined_client_simple_example(
         else:
             logger.info("VIDEO frame %s", pl['data'].shape)
 
-    def meta_cb(pl: dict) -> None:
+    def application_data_cb(pl: dict) -> None:
         if queue:
-            queue.put({**pl, 'kind': 'metadata'})
+            queue.put({**pl, 'kind': 'application_data'})
         else:
             logger.info("XML %d bytes", len(pl['data']))
 
@@ -514,12 +505,11 @@ def run_combined_client_simple_example(
         rtsp_url,
         latency=latency,
         video_frame_callback=vid_cb,
-        metadata_callback=meta_cb,
-        session_metadata_callback=sess_cb,
+        application_data_callback=application_data_cb,
+        session_application_data_callback=sess_cb,
         error_callback=err_cb,
         video_processing_fn=video_processing_fn,
         shared_config=shared_config or {},
-        timeout=timeout,
     )
     client.start()
 
@@ -528,16 +518,11 @@ if __name__ == "__main__":
     import argparse
     import cv2  # noqa: F401
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s"
-    )
-
     if mp.get_start_method(allow_none=True) != "spawn":
         mp.set_start_method("spawn", force=True)
 
     parser = argparse.ArgumentParser(
-        description="Combined RTSP video + metadata client demo"
+        description="Combined RTSP video + application data client demo"
     )
     parser.add_argument("--ip", required=True)
     parser.add_argument("--username", default="")
@@ -569,7 +554,7 @@ if __name__ == "__main__":
                     cv2.imshow("Video", item["data"])
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
-                elif item["kind"] == "metadata":
+                elif item["kind"] == "application_data":
                     print("XML:", item["data"])
                 elif item["kind"] == "error":
                     print(f"ERROR: {item.get('error_type', 'Unknown')}: {item.get('message', 'Unknown error')}")

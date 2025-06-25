@@ -1,8 +1,8 @@
+import threading
 import gi
 import time
 import logging
 import multiprocessing
-import threading
 from typing import Callable, Optional, Dict, Any
 
 gi.require_version('Gst', '1.0')
@@ -41,11 +41,6 @@ class SceneMetadataClient:
         self.rtsp_url = rtsp_url
         self.latency = latency
         self.raw_data_callback = raw_data_callback
-        self.timeout = timeout
-
-        # Thread control
-        self._loop_thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
 
         # Diagnostics counters and state.
         self.sample_count: int = 0
@@ -63,6 +58,10 @@ class SceneMetadataClient:
             logger.error("Failed to create GStreamer pipeline")
             raise RuntimeError("Pipeline creation failed")
         self._build_pipeline()
+
+        self._timeout = timeout
+        self._timer: Optional[None | threading.Timer] = None
+
 
     def _build_pipeline(self) -> None:
         """
@@ -151,6 +150,9 @@ class SceneMetadataClient:
             self.error_count += 1
             return Gst.FlowReturn.ERROR
 
+        if self._timer is not None:
+            self._timer.cancel()
+
         self.sample_count += 1
         buffer = sample.get_buffer()
         success, map_info = buffer.map(Gst.MapFlags.READ)
@@ -222,69 +224,38 @@ class SceneMetadataClient:
             self.error_count += 1
             self.stop()
 
-    def _run_loop(self) -> None:
-        """Run the GStreamer main loop in a separate thread."""
-        try:
-            self.loop.run()
-        except Exception as e:
-            logger.error("Main loop encountered an error: %s", e)
-        finally:
-            logger.debug("GStreamer main loop exited")
-
     def _timeout_handler(self) -> None:
-        """Handle timeout by stopping the client."""
-        if not self._stop_event.is_set():
-            logger.warning(f"Timeout reached ({self.timeout}s), stopping client")
-            self.error_count += 1
-            self.stop()
+        """Handle timeout by stopping client."""
+        logger.warning(f"Timeout reached ({self._timeout}s), stopping client")
+        self.stop()
 
     def start(self) -> None:
         """
-        Start the GStreamer pipeline and main loop in a separate thread.
+        Start the GStreamer pipeline and the main loop.
         """
         logger.info("Starting SceneMetadataClient pipeline")
         self.start_time = time.time()
-        
-        # Start pipeline
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
             logger.error("Failed to set pipeline to PLAYING state")
             raise RuntimeError("Pipeline failed to start")
-        
-        # Start main loop in separate thread
-        self._stop_event.clear()
-        self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
-        self._loop_thread.start()
-        
-        # Handle timeout if specified
-        if self.timeout:
-            timer = threading.Timer(self.timeout, self._timeout_handler)
-            timer.daemon = True
-            timer.start()
+        try:
+            if self._timeout:
+                self._timer = threading.Timer(self._timeout, self._timeout_handler)
+                self._timer.start()
+            self.loop.run()
+        except Exception as e:
+            logger.error("Main loop encountered an error: %s", e)
+            self.stop()
 
     def stop(self) -> None:
         """
         Stop the GStreamer pipeline and quit the main loop.
         """
-        if self._stop_event.is_set():
-            return  # Already stopping
-            
         logger.info("Stopping SceneMetadataClient pipeline")
-        self._stop_event.set()
-        
-        # Stop pipeline
         self.pipeline.set_state(Gst.State.NULL)
-        
-        # Quit main loop
         if self.loop.is_running():
             self.loop.quit()
-        
-        # Wait for loop thread to finish
-        if self._loop_thread and self._loop_thread.is_alive():
-            self._loop_thread.join(timeout=1.0)
-            if self._loop_thread.is_alive():
-                logger.warning("Main loop thread did not exit cleanly")
-        
         logger.info("Pipeline stopped")
 
     def get_diagnostics(self) -> Dict[str, Any]:

@@ -4,6 +4,8 @@ import hashlib
 import struct
 import os
 import logging
+import threading
+from typing import Optional
 
 logger = logging.getLogger("ax-devil-rtsp.SceneMetadataRawClient")
 
@@ -13,7 +15,7 @@ class SceneMetadataRawClient:
     This implementation avoids using GStreamer and implements the RTSP protocol directly.
     """
     
-    def __init__(self, rtsp_url, latency=100, raw_data_callback=None):
+    def __init__(self, rtsp_url, latency=100, raw_data_callback=None, timeout: Optional[float] = None,):
         """
         Initialize the RTSP client.
 
@@ -41,6 +43,10 @@ class SceneMetadataRawClient:
         self.session_id = None
         self.sock = None
         self.xml_buffer = b""
+
+        self._timeout = timeout
+        self._timer: Optional[None | threading.Timer] = None
+
         
     def _connect(self):
         """Establish TCP connection to RTSP server."""
@@ -136,10 +142,19 @@ class SceneMetadataRawClient:
                     logger.error("Error in raw data callback: %s", e)
             self.xml_buffer = b""
 
+    def _timeout_handler(self) -> None:
+        """Handle timeout by stopping client."""
+        logger.warning(f"Timeout reached ({self._timeout}s), stopping client")
+        self.stop()
+
     def start(self):
         """Start the metadata client and begin receiving data."""
         logger.info("Starting SceneMetadataRawClient")
         try:
+            if self._timeout:
+                self._timer = threading.Timer(self._timeout, self._timeout_handler)
+                self._timer.start()
+
             self._connect()
             
             # DESCRIBE
@@ -184,7 +199,10 @@ class SceneMetadataRawClient:
             resp = self._send_rtsp("PLAY", self.rtsp_url)
             if "200 OK" not in resp:
                 raise Exception("PLAY failed")
-                
+            
+            if self._timer is not None:
+                self._timer.cancel()
+
             # Receive data
             self._receive_data()
             

@@ -1,0 +1,1 @@
+This folder contains outdated raw examples that are not used in the project.
