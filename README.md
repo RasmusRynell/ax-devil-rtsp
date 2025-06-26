@@ -136,34 +136,44 @@ video_retriever = RtspVideoDataRetriever(axis_url, on_video_data=on_video_data)
 
 ### CLI Usage
 
+The CLI offers two subcommands:
+
+- `device` builds the RTSP URL from device details like IP address and
+  credentials.
+- `url` is for when you already have a complete RTSP URL. Options that modify
+  the URL (for example `--resolution` or `--rtp-ext`) are only valid with the
+  `device` command.
+
 **Basic Usage (streams both video and application data):**
 ```bash
-ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret
+ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret
+```
+
+**Using a complete RTSP URL:**
+```bash
+ax-devil-rtsp url "rtsp://admin:secret@192.168.1.90/axis-media/media.amp?analytics=1"
 ```
 
 **Common Options:**
 ```bash
 # Custom resolution
-ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret \
+ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret \
   --resolution 1280x720
 
 # Different camera source
-ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --source 2
-
-# Use a complete RTSP URL
-ax-devil-rtsp --rtsp-url "rtsp://admin:secret@192.168.1.90/axis-media/media.amp?analytics=1"
+ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret --source 2
 ```
 
 **Specialized Modes:**
 ```bash
 # Video only (no application data overlay)
-ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --only-video
+ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret --only-video
 
-# Application data only (no video window)  
-ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --only-application-data
+# Application data only (no video window)
+ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret --only-application-data
 
 # Disable RTP extension data
-ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --no-rtp-ext
+ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret --no-rtp-ext
 ```
 
 ### Environment Variables (Optional)
@@ -172,7 +182,10 @@ ax-devil-rtsp --ip 192.168.1.90 --username admin --password secret --no-rtp-ext
 export AX_DEVIL_TARGET_ADDR=192.168.1.90
 export AX_DEVIL_TARGET_USER=admin
 export AX_DEVIL_TARGET_PASS=secret
+export AX_DEVIL_USAGE_CLI=safe  # Set to "unsafe" to skip SSL verification
 ```
+Set these variables to avoid passing `--ip`, `--username`, or `--password` each
+time you invoke the `device` command.
 
 ---
 
