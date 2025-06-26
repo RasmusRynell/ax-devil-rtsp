@@ -54,11 +54,7 @@ def main(**kwargs):
         level=getattr(logging, args.log_level.upper(), logging.INFO),
         format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s",
     )
-    verify_ssl = args.usage_cli != "unsafe"
-    logging.info(
-        "SSL certificate verification %s",
-        "enabled" if verify_ssl else "disabled",
-    )
+
     logging.info(f"Starting with args: {args}")
 
     if getattr(args, "rtsp_url", None):
@@ -334,18 +330,6 @@ def _shared_options(func):
         default=False,
         show_default=True,
         help="Demonstrate manual start()/stop() instead of context manager",
-    )(func)
-
-    func = click.option(
-        "--usage-cli",
-        envvar="AX_DEVIL_USAGE_CLI",
-        default="safe",
-        show_default=True,
-        type=click.Choice(["safe", "unsafe"]),
-        help=(
-            "Set to 'unsafe' to skip SSL certificate verification for CLI calls "
-            "(env: AX_DEVIL_USAGE_CLI)"
-        ),
     )(func)
 
     return func
