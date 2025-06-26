@@ -260,25 +260,140 @@ def main(**kwargs):
             cv2.destroyAllWindows()
 
 
-@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+def _common_options(func):
+    """Decorator to add options shared by all commands."""
+
+    func = click.option(
+        "--latency",
+        default=100,
+        show_default=True,
+        type=int,
+        help="RTSP latency in ms (to gather out of order packets)",
+    )(func)
+
+    func = click.option(
+        "--only-video",
+        is_flag=True,
+        default=False,
+        show_default=True,
+        help=(
+            "Enable only video frames (disable application data) - "
+            "demonstrates RtspVideoDataRetriever"
+        ),
+    )(func)
+
+    func = click.option(
+        "--only-application-data",
+        is_flag=True,
+        default=False,
+        show_default=True,
+        help=(
+            "Enable only application data XML (disable video) - "
+            "demonstrates RtspApplicationDataRetriever"
+        ),
+    )(func)
+
+    func = click.option(
+        "--rtp-ext/--no-rtp-ext",
+        default=True,
+        show_default=True,
+        help="Enable or disable RTP extension",
+    )(func)
+
+    func = click.option(
+        "--log-level",
+        default="INFO",
+        show_default=True,
+        type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
+        help="Logging verbosity",
+    )(func)
+
+    func = click.option(
+        "--connection-timeout",
+        default=30,
+        show_default=True,
+        type=int,
+        help="Connection timeout in seconds",
+    )(func)
+
+    func = click.option(
+        "--resolution",
+        default=None,
+        show_default=True,
+        help=(
+            "Video resolution (e.g. 1280x720 or 500x500) "
+            "(default: None, lets device decide)"
+        ),
+    )(func)
+
+    func = click.option(
+        "--enable-video-processing",
+        is_flag=True,
+        default=False,
+        show_default=True,
+        help=(
+            "Demonstrate video_processing_fn with timestamp overlay "
+            "and brightness adjustment"
+        ),
+    )(func)
+
+    func = click.option(
+        "--brightness-adjustment",
+        default=0,
+        show_default=True,
+        type=int,
+        help="Brightness adjustment value for video processing example (-100 to 100)",
+    )(func)
+
+    func = click.option(
+        "--manual-lifecycle",
+        is_flag=True,
+        default=False,
+        show_default=True,
+        help="Demonstrate manual start()/stop() instead of context manager",
+    )(func)
+
+    func = click.option(
+        "--usage-cli",
+        envvar="AX_DEVIL_USAGE_CLI",
+        default="safe",
+        show_default=True,
+        type=click.Choice(["safe", "unsafe"]),
+        help=(
+            "Set to 'unsafe' to skip SSL certificate verification for CLI calls "
+            "(env: AX_DEVIL_USAGE_CLI)"
+        ),
+    )(func)
+
+    return func
+
+
+@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+def cli() -> None:
+    """Console-script entry point."""
+    pass
+
+
+@cli.command("device")
 @click.option(
     "--ip",
     envvar="AX_DEVIL_TARGET_ADDR",
-    help="Camera IP address (required unless --rtsp-url provided)",
+    required=True,
+    help="Camera IP address (env: AX_DEVIL_TARGET_ADDR)",
 )
 @click.option(
     "--username",
     envvar="AX_DEVIL_TARGET_USER",
     default="",
     show_default=True,
-    help="Device username",
+    help="Device username (env: AX_DEVIL_TARGET_USER)",
 )
 @click.option(
     "--password",
     envvar="AX_DEVIL_TARGET_PASS",
     default="",
     show_default=True,
-    help="Device password",
+    help="Device password (env: AX_DEVIL_TARGET_PASS)",
 )
 @click.option(
     "--source",
@@ -286,98 +401,18 @@ def main(**kwargs):
     show_default=True,
     help='What device "source"/"camera head" to use',
 )
-@click.option(
-    "--latency",
-    default=100,
-    show_default=True,
-    type=int,
-    help="RTSP latency in ms (to gather out of order packets)",
-)
-@click.option(
-    "--only-video",
-    is_flag=True,
-    default=False,
-    show_default=True,
-    help=(
-        "Enable only video frames (disable application data) - "
-        "demonstrates RtspVideoDataRetriever"
-    ),
-)
-@click.option(
-    "--only-application-data",
-    is_flag=True,
-    default=False,
-    show_default=True,
-    help=(
-        "Enable only application data XML (disable video) - "
-        "demonstrates RtspApplicationDataRetriever"
-    ),
-)
-@click.option(
-    "--rtp-ext/--no-rtp-ext",
-    default=True,
-    show_default=True,
-    help="Enable or disable RTP extension",
-)
-@click.option("--rtsp-url", help="Full RTSP URL, overrides all other arguments")
-@click.option(
-    "--log-level",
-    default="INFO",
-    show_default=True,
-    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
-    help="Logging verbosity",
-)
-@click.option(
-    "--connection-timeout",
-    default=30,
-    show_default=True,
-    type=int,
-    help="Connection timeout in seconds",
-)
-@click.option(
-    "--resolution",
-    default=None,
-    show_default=True,
-    help=(
-        "Video resolution (e.g. 1280x720 or 500x500) "
-        "(default: None, lets device decide)"
-    ),
-)
-@click.option(
-    "--enable-video-processing",
-    is_flag=True,
-    default=False,
-    show_default=True,
-    help=(
-        "Demonstrate video_processing_fn with timestamp overlay "
-        "and brightness adjustment"
-    ),
-)
-@click.option(
-    "--brightness-adjustment",
-    default=0,
-    show_default=True,
-    type=int,
-    help="Brightness adjustment value for video processing example (-100 to 100)",
-)
-@click.option(
-    "--manual-lifecycle",
-    is_flag=True,
-    default=False,
-    show_default=True,
-    help="Demonstrate manual start()/stop() instead of context manager",
-)
-@click.option(
-    "--usage-cli",
-    envvar="AX_DEVIL_USAGE_CLI",
-    default="safe",
-    show_default=True,
-    type=click.Choice(["safe", "unsafe"]),
-    help="Set to 'unsafe' to skip SSL certificate verification for CLI calls",
-)
-def cli(**kwargs) -> None:
-    """Console-script entry point."""
+@_common_options
+def device(**kwargs) -> None:
+    """Connect using device details."""
     main(**kwargs)
+
+
+@cli.command("url")
+@click.argument("rtsp_url")
+@_common_options
+def url(rtsp_url: str, **kwargs) -> None:
+    """Connect using a pre-built RTSP URL."""
+    main(rtsp_url=rtsp_url, **kwargs)
 
 
 if __name__ == "__main__":
