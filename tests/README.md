@@ -31,9 +31,11 @@ This directory contains tests for the RTSP data retriever system, focusing on me
 - **Integration Tests:**  
   - Use the local RTSP server to verify that retrievers receive and process both video and application data streams as expected.
   - Validate callback invocation, error propagation, and resource cleanup in real scenarios.
+  - Test video processing functions with the new payload-based signature, including `latest_rtp_data` integration.
 
 - **Unit Tests:**  
   - Target specific logic that is not easily or reliably tested via integration (e.g., error handling, callback dispatch, or edge cases).
+  - Isolate video processing function behavior, signature validation, and timing capture.
   - Avoid duplicating coverage already provided by integration tests.
 
 ## Directory Structure
