@@ -136,6 +136,14 @@ video_retriever = RtspVideoDataRetriever(axis_url, on_video_data=on_video_data)
 
 ### CLI Usage
 
+The CLI offers two subcommands:
+
+- `device` builds the RTSP URL from device details like IP address and
+  credentials.
+- `url` is for when you already have a complete RTSP URL. Options that modify
+  the URL (for example `--resolution` or `--rtp-ext`) are only valid with the
+  `device` command.
+
 **Basic Usage (streams both video and application data):**
 ```bash
 ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret
@@ -176,6 +184,8 @@ export AX_DEVIL_TARGET_USER=admin
 export AX_DEVIL_TARGET_PASS=secret
 export AX_DEVIL_USAGE_CLI=safe  # Set to "unsafe" to skip SSL verification
 ```
+Set these variables to avoid passing `--ip`, `--username`, or `--password` each
+time you invoke the `device` command.
 
 ---
 

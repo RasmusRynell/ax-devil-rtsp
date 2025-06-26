@@ -61,7 +61,7 @@ def main(**kwargs):
     )
     logging.info(f"Starting with args: {args}")
 
-    if args.rtsp_url:
+    if getattr(args, "rtsp_url", None):
         rtsp_url = args.rtsp_url
     else:
         try:
@@ -69,11 +69,11 @@ def main(**kwargs):
                 ip=args.ip,
                 username=args.username,
                 password=args.password,
-                video_source=args.source,
+                video_source=getattr(args, "source", 1),
                 get_video_data=not args.only_application_data,
                 get_application_data=not args.only_video,
-                rtp_ext=args.rtp_ext,
-                resolution=args.resolution,
+                rtp_ext=getattr(args, "rtp_ext", True),
+                resolution=getattr(args, "resolution", None),
             )
         except ValueError as e:
             logging.error(e)
@@ -260,8 +260,8 @@ def main(**kwargs):
             cv2.destroyAllWindows()
 
 
-def _common_options(func):
-    """Decorator to add options shared by all commands."""
+def _shared_options(func):
+    """Decorator for options common to all commands."""
 
     func = click.option(
         "--latency",
@@ -294,13 +294,6 @@ def _common_options(func):
     )(func)
 
     func = click.option(
-        "--rtp-ext/--no-rtp-ext",
-        default=True,
-        show_default=True,
-        help="Enable or disable RTP extension",
-    )(func)
-
-    func = click.option(
         "--log-level",
         default="INFO",
         show_default=True,
@@ -314,16 +307,6 @@ def _common_options(func):
         show_default=True,
         type=int,
         help="Connection timeout in seconds",
-    )(func)
-
-    func = click.option(
-        "--resolution",
-        default=None,
-        show_default=True,
-        help=(
-            "Video resolution (e.g. 1280x720 or 500x500) "
-            "(default: None, lets device decide)"
-        ),
     )(func)
 
     func = click.option(
@@ -370,7 +353,7 @@ def _common_options(func):
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 def cli() -> None:
-    """Console-script entry point."""
+    """Retrieve RTSP video and application data from Axis devices."""
     pass
 
 
@@ -401,17 +384,34 @@ def cli() -> None:
     show_default=True,
     help='What device "source"/"camera head" to use',
 )
-@_common_options
+@click.option(
+    "--rtp-ext/--no-rtp-ext",
+    default=True,
+    show_default=True,
+    help="Enable or disable RTP extension",
+)
+@click.option(
+    "--resolution",
+    default=None,
+    show_default=True,
+    help=(
+        "Video resolution (e.g. 1280x720 or 500x500) "
+        "(default: None, lets device decide)"
+    ),
+)
+@_shared_options
 def device(**kwargs) -> None:
-    """Connect using device details."""
+    """Build the RTSP URL from device info and connect."""
     main(**kwargs)
 
 
 @cli.command("url")
 @click.argument("rtsp_url")
-@_common_options
+@_shared_options
 def url(rtsp_url: str, **kwargs) -> None:
-    """Connect using a pre-built RTSP URL."""
+    """Connect using an existing RTSP URL.
+
+    Options that build the URL (e.g. ``--resolution``) are not available."""
     main(rtsp_url=rtsp_url, **kwargs)
 
 
