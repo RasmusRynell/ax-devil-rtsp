@@ -54,6 +54,11 @@ def main(**kwargs):
         level=getattr(logging, args.log_level.upper(), logging.INFO),
         format="[%(process)d] %(asctime)s - %(levelname)s - %(message)s",
     )
+    verify_ssl = args.usage_cli != "unsafe"
+    logging.info(
+        "SSL certificate verification %s",
+        "enabled" if verify_ssl else "disabled",
+    )
     logging.info(f"Starting with args: {args}")
 
     if args.rtsp_url:
@@ -256,9 +261,25 @@ def main(**kwargs):
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
-@click.option("--ip", help="Camera IP address (required unless --rtsp-url provided)")
-@click.option("--username", default="", show_default=True, help="Device username")
-@click.option("--password", default="", show_default=True, help="Device password")
+@click.option(
+    "--ip",
+    envvar="AX_DEVIL_TARGET_ADDR",
+    help="Camera IP address (required unless --rtsp-url provided)",
+)
+@click.option(
+    "--username",
+    envvar="AX_DEVIL_TARGET_USER",
+    default="",
+    show_default=True,
+    help="Device username",
+)
+@click.option(
+    "--password",
+    envvar="AX_DEVIL_TARGET_PASS",
+    default="",
+    show_default=True,
+    help="Device password",
+)
 @click.option(
     "--source",
     default="1",
@@ -345,6 +366,14 @@ def main(**kwargs):
     default=False,
     show_default=True,
     help="Demonstrate manual start()/stop() instead of context manager",
+)
+@click.option(
+    "--usage-cli",
+    envvar="AX_DEVIL_USAGE_CLI",
+    default="safe",
+    show_default=True,
+    type=click.Choice(["safe", "unsafe"]),
+    help="Set to 'unsafe' to skip SSL certificate verification for CLI calls",
 )
 def cli(**kwargs) -> None:
     """Console-script entry point."""
