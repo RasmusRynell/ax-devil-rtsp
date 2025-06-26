@@ -88,6 +88,7 @@ pip install ax-devil-rtsp
 ```python
 from ax_devil_rtsp import RtspDataRetriever, build_axis_rtsp_url
 from multiprocessing import freeze_support
+import time
 
 # Define callback functions
 def on_video_data(payload):
@@ -104,42 +105,37 @@ def on_error(payload):
     print(f"Error: {payload['message']}")
 
 def main():
-    # Option 1: Direct RTSP URL
-    rtsp_url = "rtsp://username:password@192.168.1.90/axis-media/media.amp?analytics=1"
+    # Build the RTSP URL or supply one directly
+    # rtsp_url = "rtsp://username:password@192.168.1.90/axis-media/media.amp?analytics=1"
+    rtsp_url = build_axis_rtsp_url(
+        ip="192.168.1.90",
+        username="username",
+        password="password",
+        video_source=1,
+        get_video_data=True,
+        get_application_data=True,
+        rtp_ext=True,  # Enable RTP extension (default: True)
+        resolution="640x480",
+    )
+
     retriever = RtspDataRetriever(
         rtsp_url=rtsp_url,
         on_video_data=on_video_data,
         on_application_data=on_application_data,
         on_error=on_error,
-        latency=100
+        latency=100,
     )
 
     # Use context manager for automatic cleanup
     with retriever:
         print("Streaming... Press Ctrl+C to stop")
-        # Keep running until interrupted
+        while True:
+            time.sleep(0.1)
 
 if __name__ == "__main__":
     freeze_support()  # Needed on Windows when multiprocessing start method is 'spawn'
     main()
-
-# Option 2: Build Axis-style URL
-axis_url = build_axis_rtsp_url(
-    ip="192.168.1.90",
-    username="username", 
-    password="password",
-    video_source=1,
-    get_video_data=True,
-    get_application_data=True,
-    rtp_ext=True,  # Enable RTP extension (default: True)
-    resolution="640x480"
-)
-
-# Video-only retriever
-from ax_devil_rtsp import RtspVideoDataRetriever
-video_retriever = RtspVideoDataRetriever(axis_url, on_video_data=on_video_data)
 ```
-
 > **Note**
 > 
 > Because `ax-devil-rtsp` forces the multiprocessing start method to `'spawn'`,
