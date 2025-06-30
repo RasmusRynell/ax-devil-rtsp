@@ -113,7 +113,7 @@ def _client_process(
             latency=latency,
             video_frame_callback=video_cb,
             application_data_callback=application_data_cb,
-            session_application_data_callback=session_cb,
+            stream_session_metadata_callback=session_cb,
             error_callback=error_cb,
             video_processing_fn=video_processing_fn,
             shared_config=shared_config or {},
