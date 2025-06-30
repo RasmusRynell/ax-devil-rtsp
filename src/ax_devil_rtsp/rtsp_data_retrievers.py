@@ -67,7 +67,7 @@ def _client_process(
     rtsp_url: str,
     latency: int,
     queue: mp.Queue,
-    video_processing_fn: Optional[Callable],
+    video_processing_fn: Optional[Callable[[Dict[str, Any], dict], Any]],
     shared_config: Optional[dict],
     connection_timeout: Optional[float],
     log_level: int,
@@ -155,6 +155,9 @@ class RtspDataRetriever(ABC):
         GStreamer pipeline latency in ms.
     video_processing_fn : Callable, optional
         Optional function to process video frames in the GStreamer process.
+        Called as ``video_processing_fn(payload, shared_config)`` where
+        ``payload`` contains the decoded frame and the latest RTP extension
+        data.
     shared_config : dict, optional
         Optional shared config for the video processing function.
     connection_timeout : int, default=30
@@ -173,7 +176,7 @@ class RtspDataRetriever(ABC):
         on_error: Optional[ErrorCallback] = None,
         on_session_start: Optional[SessionStartCallback] = None,
         latency: int = 200,
-        video_processing_fn: Optional[Callable] = None,
+        video_processing_fn: Optional[Callable[[Dict[str, Any], dict], Any]] = None,
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
         log_level: Optional[int] = None,
@@ -336,7 +339,7 @@ class RtspVideoDataRetriever(RtspDataRetriever):
         on_error: Optional[ErrorCallback] = None,
         on_session_start: Optional[SessionStartCallback] = None,
         latency: int = 200,
-        video_processing_fn: Optional[Callable] = None,
+        video_processing_fn: Optional[Callable[[Dict[str, Any], dict], Any]] = None,
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
         log_level: Optional[int] = None,
@@ -366,7 +369,7 @@ class RtspApplicationDataRetriever(RtspDataRetriever):
         on_error: Optional[ErrorCallback] = None,
         on_session_start: Optional[SessionStartCallback] = None,
         latency: int = 200,
-        video_processing_fn: Optional[Callable] = None,
+        video_processing_fn: Optional[Callable[[Dict[str, Any], dict], Any]] = None,
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
         log_level: Optional[int] = None,

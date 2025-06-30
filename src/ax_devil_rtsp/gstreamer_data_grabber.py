@@ -60,7 +60,7 @@ class CombinedRTSPClient:
         application_data_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         session_application_data_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         error_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        video_processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
+        video_processing_fn: Optional[Callable[[Dict[str, Any], dict], Any]] = None,
         shared_config: Optional[dict] = None,
         timeout: Optional[float] = None,
     ) -> None:
@@ -307,19 +307,20 @@ class CombinedRTSPClient:
             return Gst.FlowReturn.ERROR
         buf.unmap(info)
 
+        payload = {
+            'data': frame,
+            'latest_rtp_data': self.latest_rtp_data,
+        }
+
         if self.video_proc_fn:
             start = time.time()
             try:
-                frame = self.video_proc_fn(frame, self.shared_cfg)
+                payload['data'] = self.video_proc_fn(payload, self.shared_cfg)
             except Exception as e:
                 self._report_error("Video Processing", f"User processing function failed: {e}", e)
             self._timers['vid_proc'] = time.time() - start
 
-        payload = {
-            'data': frame,
-            'latest_rtp_data': self.latest_rtp_data,
-            'diagnostics': self._video_diag()
-        }
+        payload['diagnostics'] = self._video_diag()
         if self.video_frame_cb:
             logger.debug(f"Calling video_frame_cb (count={self.video_cnt})")
             start = time.time()
@@ -476,7 +477,7 @@ def run_combined_client_simple_example(
     *,
     latency: int = 200,
     queue: Optional[mp.Queue] = None,
-    video_processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
+    video_processing_fn: Optional[Callable[[Dict[str, Any], dict], Any]] = None,
     shared_config: Optional[dict] = None,
 ) -> None:
     """Example runner: spawns client and logs or queues payloads."""

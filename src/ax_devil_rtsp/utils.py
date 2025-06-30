@@ -4,6 +4,7 @@ import logging
 import re
 from typing import Dict, Any
 import urllib.parse
+import numpy as np
 
 logger = logging.getLogger("ax-devil-rtsp.utils")
 
@@ -190,4 +191,23 @@ def build_axis_rtsp_url(
         query_string = urllib.parse.urlencode(params)
         url += "?" + query_string
     return url
+
+
+def rgb_to_bgr(frame: np.ndarray) -> np.ndarray:
+    """Convert an RGB image to BGR with minimal overhead.
+
+    Parameters
+    ----------
+    frame : np.ndarray
+        Input image in RGB order with shape ``(H, W, 3)``.
+
+    Returns
+    -------
+    np.ndarray
+        New array in BGR order. The returned array is contiguous so it can be
+        used directly with OpenCV functions.
+    """
+    if frame.ndim != 3 or frame.shape[2] != 3:
+        raise ValueError("Expected RGB image with shape (H, W, 3)")
+    return np.ascontiguousarray(frame[..., ::-1])
 
