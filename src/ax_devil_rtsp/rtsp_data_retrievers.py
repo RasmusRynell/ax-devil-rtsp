@@ -1,11 +1,13 @@
 """
 RTSP Data Retriever Classes
 
-This module provides high-level, process-safe retrievers for video and/or application
-data from RTSP streams, with a focus on Axis cameras. Use the specialized retrievers for
-video-only, application-data-only, or combined retrieval. For Axis-style URLs, use build_axis_rtsp_url.
+This module provides high-level, process-safe retrievers for video and/or
+application data from RTSP streams, with a focus on Axis cameras. Use the
+specialized retrievers for video-only, application-data-only, or combined
+retrieval. For Axis-style URLs, use ``build_axis_rtsp_url``.
 
-All retrievers run the GStreamer client in a subprocess and communicate via a thread-safe queue.
+All retrievers run the GStreamer client in a subprocess and communicate via a
+thread-safe queue.
 
 See Also:
     - build_axis_rtsp_url (in ax_devil_rtsp.utils)
@@ -17,12 +19,15 @@ Note:
 
 import logging
 import multiprocessing as mp
-import threading
-import queue as queue_mod
-from typing import Callable, Optional, Dict, Any, TYPE_CHECKING
-from abc import ABC
 import os
+import queue as queue_mod
+import threading
 import traceback
+from abc import ABC
+from multiprocessing import shared_memory
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+
+import numpy as np
 
 from .gstreamer_data_grabber import CombinedRTSPClient
 
@@ -30,11 +35,12 @@ from .gstreamer_data_grabber import CombinedRTSPClient
 # compatibility between parent and GStreamer subprocesses, and to avoid
 # queue breakage or deadlocks. This is required for reliable cross-process
 # communication, especially when using GStreamer and Python >=3.8.
-mp.set_start_method('spawn', force=True)
+mp.set_start_method("spawn", force=True)
 
 RtspPayload = Dict[str, Any]
 if TYPE_CHECKING:
     from typing import Protocol
+
     class VideoDataCallback(Protocol):
         def __call__(self, payload: RtspPayload) -> None: ...
     class ApplicationDataCallback(Protocol):
@@ -43,6 +49,7 @@ if TYPE_CHECKING:
         def __call__(self, payload: RtspPayload) -> None: ...
     class SessionStartCallback(Protocol):
         def __call__(self, payload: RtspPayload) -> None: ...
+
 else:
     VideoDataCallback = Callable[[RtspPayload], None]
     ApplicationDataCallback = Callable[[RtspPayload], None]
@@ -71,13 +78,18 @@ def _client_process(
     shared_config: Optional[dict],
     connection_timeout: Optional[float],
     log_level: int,
+    shm_name: Optional[str],
+    shm_size: int,
 ):
     """
-    Subprocess target: Instantiates CombinedRTSPClient and pushes events to the queue.
-    Internal use only. Also starts a fallback thread to monitor parent process liveness.
+    Subprocess target: Instantiates ``CombinedRTSPClient`` and pushes events to
+    the queue. Optionally attaches to a shared memory segment for video frame
+    transfer. Internal use only. Also starts a fallback thread to monitor parent
+    process liveness.
     """
     import sys
     import time
+
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -85,6 +97,10 @@ def _client_process(
     )
     parent_pid = os.getppid()
     client_should_stop = threading.Event()
+
+    shm = None
+    if shm_name:
+        shm = shared_memory.SharedMemory(name=shm_name)
 
     def parent_monitor_thread():
         """Daemon thread: shuts down client if parent process dies."""
@@ -100,14 +116,19 @@ def _client_process(
 
     try:
         logger.info(f"CombinedRTSPClient subprocess starting for {rtsp_url}")
+
         def video_cb(payload):
             queue.put({"kind": "video", **payload})
+
         def application_data_cb(payload):
             queue.put({"kind": "application_data", **payload})
+
         def session_cb(payload):
             queue.put({"kind": "session_start", **payload})
+
         def error_cb(payload):
             queue.put({"kind": "error", **payload})
+
         client = CombinedRTSPClient(
             rtsp_url,
             latency=latency,
@@ -118,6 +139,7 @@ def _client_process(
             video_processing_fn=video_processing_fn,
             shared_config=shared_config or {},
             timeout=connection_timeout,
+            shared_memory=shm,
         )
         monitor = threading.Thread(target=parent_monitor_thread, daemon=True)
         monitor.start()
@@ -125,18 +147,27 @@ def _client_process(
             client.start()
         finally:
             client_should_stop.set()
+            if shm is not None:
+                shm.close()
     except Exception as exc:
         logger.error(f"Exception in CombinedRTSPClient subprocess: {exc}")
         traceback.print_exc()
         # Optionally, put an error on the queue so the parent sees it
         if queue:
-            queue.put({"kind": "error", "exception": str(exc), "traceback": traceback.format_exc()})
+            queue.put(
+                {
+                    "kind": "error",
+                    "exception": str(exc),
+                    "traceback": traceback.format_exc(),
+                }
+            )
         sys.exit(1)
 
 
-class RtspDataRetriever(ABC):
+class RtspDataRetriever(ABC):  # noqa: B024
     """
-    Abstract base class for RTSP data retrievers. Manages process and queue thread lifecycle.
+    Abstract base class for RTSP data retrievers. Manages process and queue
+    thread lifecycle.
     Not intended to be instantiated directly.
 
     Parameters
@@ -162,7 +193,11 @@ class RtspDataRetriever(ABC):
     log_level : int, optional
         Logging level used in the subprocess. Defaults to the parent's
         effective logging level.
+    shm_size : int, optional
+        Size in bytes of the shared memory buffer for video frames. Defaults to
+        enough space for a 1080p RGB frame.
     """
+
     QUEUE_POLL_INTERVAL: float = 0.5  # seconds
 
     def __init__(
@@ -177,11 +212,14 @@ class RtspDataRetriever(ABC):
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
         log_level: Optional[int] = None,
+        shm_size: int = 6_220_800,
     ):
-        # Reset internal state to avoid stale references if start() is called after a crash
+        # Reset internal state to avoid stale references if start() is called
+        # after a crash
         self._proc: Optional[mp.Process] = None
-        # Use a plain mp.Queue() for cross-process communication, as in the working example in gstreamer_data_grabber.py.
-        # This is robust and avoids the pitfalls of Manager().Queue() for high-throughput or large data.
+        # Use a plain mp.Queue() for cross-process communication, as in the
+        # working example in gstreamer_data_grabber.py. This avoids the pitfalls
+        # of Manager().Queue() for high-throughput or large data.
         self._queue: mp.Queue = mp.Queue()
         self._queue_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -194,20 +232,30 @@ class RtspDataRetriever(ABC):
         self._connection_timeout = connection_timeout
         self._on_error = on_error
         self._on_session_start = on_session_start
-        self._log_level = log_level if log_level is not None else logging.getLogger().getEffectiveLevel()
+        self._log_level = (
+            log_level
+            if log_level is not None
+            else logging.getLogger().getEffectiveLevel()
+        )
+        self._shm_size = shm_size
+        self._shared_mem: Optional[shared_memory.SharedMemory] = None
 
     def start(self) -> None:
         """
-        Start the retriever. Launches a subprocess for the GStreamer client and a thread to dispatch queue events to callbacks.
+        Start the retriever. Launches a subprocess for the GStreamer client and
+        a thread to dispatch queue events to callbacks.
         Raises RuntimeError if already started.
         """
         if self._proc is not None and self._proc.is_alive():
             raise RuntimeError("Retriever already started.")
-        # Reset internal state to avoid stale references if start() is called after a crash
+        # Reset internal state to avoid stale references if start() is called
+        # after a crash
         self._proc = None
         self._queue_thread = None
         self._stop_event.clear()
         logger.info("Starting retriever process...")
+        self._shared_mem = shared_memory.SharedMemory(create=True, size=self._shm_size)
+        shm_name = self._shared_mem.name
         self._proc = mp.Process(
             target=_client_process,
             args=(
@@ -218,16 +266,21 @@ class RtspDataRetriever(ABC):
                 self._shared_config,
                 self._connection_timeout,
                 self._log_level,
+                shm_name,
+                self._shm_size,
             ),
         )
         self._proc.start()
-        self._queue_thread = threading.Thread(target=self._queue_dispatch_loop, daemon=True)
+        self._queue_thread = threading.Thread(
+            target=self._queue_dispatch_loop, daemon=True
+        )
         self._queue_thread.start()
         logger.info("Retriever process started.")
 
     def stop(self) -> None:
         """
-        Stop the retriever. Terminates the subprocess and queue thread. Safe to call multiple times.
+        Stop the retriever. Terminates the subprocess and queue thread. Safe to
+        call multiple times.
         """
         if self._proc is None:
             return
@@ -242,6 +295,13 @@ class RtspDataRetriever(ABC):
                 self._queue_thread.join(timeout=2)
             self._proc = None
             self._queue_thread = None
+            if self._shared_mem is not None:
+                try:
+                    self._shared_mem.close()
+                    self._shared_mem.unlink()
+                except FileNotFoundError:
+                    pass
+                self._shared_mem = None
         logger.info("Retriever process stopped.")
 
     def close(self) -> None:
@@ -252,12 +312,13 @@ class RtspDataRetriever(ABC):
 
     def _queue_dispatch_loop(self) -> None:
         """
-        Internal: Thread target. Reads from the queue and dispatches to the correct callback.
+        Internal: Thread target. Reads from the queue and dispatches to the
+        correct callback.
         Handles EOFError/OSError gracefully if the parent process is dead.
         Catches and logs exceptions in user callbacks to avoid breaking the loop.
         """
-        wait_time_s = 10 # TODO: Move this? make it configurable?
-        MAX_EMPTY_POLLS = wait_time_s/self.QUEUE_POLL_INTERVAL
+        wait_time_s = 10  # TODO: Move this? make it configurable?
+        MAX_EMPTY_POLLS = wait_time_s / self.QUEUE_POLL_INTERVAL
         consecutive_empty = 0
         while not self._stop_event.is_set():
             if self._queue is None:
@@ -266,12 +327,16 @@ class RtspDataRetriever(ABC):
                 item = self._queue.get(timeout=self.QUEUE_POLL_INTERVAL)
                 consecutive_empty = 0  # reset on successful read
             except queue_mod.Empty:
-                # No item ready yet. Keep waiting unless the subprocess has exited or we are stopping.
+                # No item ready yet. Keep waiting unless the subprocess has
+                # exited or we are stopping.
                 if self._stop_event.is_set():
                     break
-                # If the subprocess has died or was never started, exit to avoid busy-loop.
+                # If the subprocess has died or was never started, exit to avoid
+                # busy-loop.
                 if self._proc is None or not self._proc.is_alive():
-                    logger.debug("Queue polling ended because retriever subprocess is not alive.")
+                    logger.debug(
+                        "Queue polling ended because retriever subprocess is not alive."
+                    )
                     break
                 # Otherwise, continue polling.
                 consecutive_empty += 1
@@ -287,6 +352,15 @@ class RtspDataRetriever(ABC):
             try:
                 if kind == "video" and self._on_video_data:
                     logger.debug("Dispatching video callback.")
+                    if self._shared_mem is not None and "shm_name" in item:
+                        shape = tuple(item.pop("shape"))
+                        dtype = np.dtype(item.pop("dtype"))
+                        item.pop("shm_name", None)
+                        nbytes = int(np.prod(shape) * dtype.itemsize)
+                        frame = np.ndarray(
+                            shape, dtype=dtype, buffer=self._shared_mem.buf[:nbytes]
+                        ).copy()
+                        item["data"] = frame
                     self._on_video_data(item)
                 elif kind == "application_data" and self._on_application_data:
                     logger.debug("Dispatching application data callback.")
@@ -298,7 +372,10 @@ class RtspDataRetriever(ABC):
                     logger.debug("Dispatching session_start callback.")
                     self._on_session_start(item)
             except Exception as exc:
-                logger.error(f"Exception in user callback for kind '{kind}': {exc}", exc_info=True)
+                logger.error(
+                    f"Exception in user callback for kind '{kind}': {exc}",
+                    exc_info=True,
+                )
 
     def __enter__(self) -> "RtspDataRetriever":
         """
@@ -324,11 +401,11 @@ class RtspDataRetriever(ABC):
         return self._proc is not None and self._proc.is_alive()
 
 
-
 class RtspVideoDataRetriever(RtspDataRetriever):
     """
     Retrieve only video data from an RTSP stream.
     """
+
     def __init__(
         self,
         rtsp_url: str,
@@ -359,6 +436,7 @@ class RtspApplicationDataRetriever(RtspDataRetriever):
     """
     Retrieve only application (Axis Scene Description) data from an RTSP stream.
     """
+
     def __init__(
         self,
         rtsp_url: str,
