@@ -58,7 +58,7 @@ class CombinedRTSPClient:
         latency: int = 100,
         video_frame_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         application_data_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        session_application_data_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        stream_session_metadata_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         error_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         video_processing_fn: Optional[Callable[[np.ndarray, dict], Any]] = None,
         shared_config: Optional[dict] = None,
@@ -68,7 +68,7 @@ class CombinedRTSPClient:
         self.latency = latency
         self.video_frame_cb = video_frame_callback
         self.application_data_cb = application_data_callback
-        self.session_md_cb = session_application_data_callback
+        self.session_md_cb = stream_session_metadata_callback
         self.error_cb = error_callback
         self.video_proc_fn = video_processing_fn
         self.shared_cfg = shared_config or {}
@@ -506,7 +506,7 @@ def run_combined_client_simple_example(
         latency=latency,
         video_frame_callback=vid_cb,
         application_data_callback=application_data_cb,
-        session_application_data_callback=sess_cb,
+        stream_session_metadata_callback=sess_cb,
         error_callback=err_cb,
         video_processing_fn=video_processing_fn,
         shared_config=shared_config or {},
