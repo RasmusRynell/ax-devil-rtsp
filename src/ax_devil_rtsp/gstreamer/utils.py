@@ -23,13 +23,43 @@ def _map_buffer(buf: Gst.Buffer) -> tuple[bool, Gst.MapInfo]:
 
 
 def _to_rgb_array(info: Gst.MapInfo, width: int, height: int, fmt: str) -> np.ndarray:
-    """Convert raw buffer data into an RGB numpy array based on format."""
-    data = info.data
+    """Optimized conversion of GStreamer buffer to RGB numpy array."""
+    view = memoryview(info.data)
+
     if fmt == "RGB":
-        return np.frombuffer(data, np.uint8).reshape(height, width, 3)
-    if fmt in ("RGB16", "BGR16"):
-        return np.frombuffer(data, np.uint16).reshape(height, width)
-    raise ValueError(f"Unsupported pixel format {fmt}")
+        return np.frombuffer(view, np.uint8).reshape((height, width, 3))
+
+    elif fmt == "BGR":
+        arr = np.frombuffer(view, np.uint8).reshape((height, width, 3))
+        # Fastest way to channel-swap (avoid temporary copy)
+        return arr[..., [2, 1, 0]]
+
+    elif fmt in ("RGBx", "xRGB"):
+        arr = np.frombuffer(view, np.uint8).reshape((height, width, 4))
+        return arr[..., :3]  # No copy unless forced downstream
+
+    elif fmt in ("BGRx", "xBGR"):
+        arr = np.frombuffer(view, np.uint8).reshape((height, width, 4))
+        return arr[..., [2, 1, 0]]  # Equivalent to [:3][..., ::-1] but faster
+
+    elif fmt == "RGBA":
+        arr = np.frombuffer(view, np.uint8).reshape((height, width, 4))
+        return arr[..., :3]
+
+    elif fmt == "BGRA":
+        arr = np.frombuffer(view, np.uint8).reshape((height, width, 4))
+        return arr[..., [2, 1, 0]]
+
+    elif fmt == "RGB16":
+        arr = np.frombuffer(view, np.uint16).reshape((height, width, 3))
+        return arr
+
+    elif fmt == "BGR16":
+        arr = np.frombuffer(view, np.uint16).reshape((height, width, 3))
+        return arr[..., [2, 1, 0]]
+
+    raise ValueError(f"Unsupported pixel format: {fmt}")
+
 
 
 def run_combined_client_simple_example(

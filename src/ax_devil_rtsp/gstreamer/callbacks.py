@@ -67,6 +67,10 @@ class CallbackHandlerMixin:
         if sink_pad and not sink_pad.is_linked():
             pad.link(sink_pad)
 
+        if self._timer is not None:
+            logger.debug("Timeout timer stopped")
+            self._timer.cancel()
+
         if self.session_md_cb:
             self.session_md_cb(parse_session_metadata({
                 'stream_name': pad.get_name(),
@@ -145,7 +149,10 @@ class CallbackHandlerMixin:
         width = struct.get_value('width')
         height = struct.get_value('height')
         fmt = struct.get_string('format')
-
+        
+        # TODO: Do this fix in some better way. Also why in the world fmt can be RBG but the image is still bgr...
+        fmt = "BGR"
+        
         try:
             frame = _to_rgb_array(info, width, height, fmt)
         except Exception as e:
@@ -193,9 +200,6 @@ class CallbackHandlerMixin:
         if not ok:
             self._report_error("Application Data Buffer", "Failed to map application data buffer")
             return Gst.FlowReturn.ERROR
-
-        if self._timer is not None:
-            self._timer.cancel()
 
         raw = bytes(info.data)
         buf.unmap(info)
