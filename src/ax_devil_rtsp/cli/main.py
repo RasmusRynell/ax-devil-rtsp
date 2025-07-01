@@ -19,12 +19,13 @@ from ..utils import build_axis_rtsp_url
 
 
 def simple_video_processing_example(
-    frame: np.ndarray, shared_config: dict
+    payload: dict, shared_config: dict
 ) -> np.ndarray:
     """
     Example video processing function that demonstrates the video_processing_fn feature.
     Adds a timestamp overlay and optionally applies brightness adjustment.
     """
+    frame = payload["data"]
     processed = frame.copy()
 
     # Add timestamp overlay
