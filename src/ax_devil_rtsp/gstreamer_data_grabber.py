@@ -344,6 +344,7 @@ class CombinedRTSPClient:
                 self._report_error(
                     "SharedMemory", "Frame too large for shared memory buffer"
                 )
+                payload["data"] = frame_c
             else:
                 shm_view = np.ndarray(
                     frame_c.shape,
@@ -351,13 +352,15 @@ class CombinedRTSPClient:
                     buffer=self.shared_mem.buf[:nbytes],
                 )
                 shm_view[...] = frame_c
-            payload.update(
-                {
-                    "shm_name": self.shared_mem.name,
-                    "shape": frame_c.shape,
-                    "dtype": str(frame_c.dtype),
-                }
-            )
+                payload.update(
+                    {
+                        "shm_name": self.shared_mem.name,
+                        "shape": frame_c.shape,
+                        "dtype": str(frame_c.dtype),
+                    }
+                )
+        else:
+            payload["data"] = frame
         if self.video_frame_cb:
             logger.debug(f"Calling video_frame_cb (count={self.video_cnt})")
             start = time.time()
