@@ -71,6 +71,8 @@ def _client_process(
     shared_config: Optional[dict],
     connection_timeout: Optional[float],
     log_level: int,
+    enable_video: bool,
+    enable_application: bool,
 ):
     """
     Subprocess target: Instantiates CombinedRTSPClient and pushes events to the queue.
@@ -111,8 +113,8 @@ def _client_process(
         client = CombinedRTSPClient(
             rtsp_url,
             latency=latency,
-            video_frame_callback=video_cb,
-            application_data_callback=application_data_cb,
+            video_frame_callback=video_cb if enable_video else None,
+            application_data_callback=application_data_cb if enable_application else None,
             stream_session_metadata_callback=session_cb,
             error_callback=error_cb,
             video_processing_fn=video_processing_fn,
@@ -218,6 +220,8 @@ class RtspDataRetriever(ABC):
                 self._shared_config,
                 self._connection_timeout,
                 self._log_level,
+                self._on_video_data is not None or self._video_processing_fn is not None,
+                self._on_application_data is not None,
             ),
         )
         self._proc.start()

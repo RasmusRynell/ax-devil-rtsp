@@ -28,12 +28,15 @@ class PipelineSetupMixin:
         self.v_depay: Optional[Gst.Element] = None
         self.m_jit: Optional[Gst.Element] = None
         self.application_data_branch_built: bool = False
+        self.video_branch_enabled: bool = True
+        self.application_data_branch_enabled: bool = True
 
     def _setup_elements(self) -> None:
         """Set up all pipeline elements."""
         logger.debug("Setting up pipeline elements")
         self._create_rtspsrc()
-        self._create_video_branch()
+        if self.video_branch_enabled:
+            self._create_video_branch()
         self.application_data_branch_built = False
 
     def _create_rtspsrc(self) -> None:
