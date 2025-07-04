@@ -34,7 +34,7 @@ class CallbackHandlerMixin:
         self.video_proc_fn: Optional[callable] = None
         self.shared_cfg: Dict[str, Any] = {}
         self.latest_rtp_data: Optional[Dict[str, Any]] = None
-        self._xml_acc: bytesarray = bytearray()
+        self._xml_acc: bytearray = bytearray()
         self._timer: Optional[threading.Timer] = None
         self._timeout: Optional[float] = None
 
