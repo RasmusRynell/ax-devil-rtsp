@@ -31,8 +31,8 @@ def _to_rgb_array(info: Gst.MapInfo, width: int, height: int, fmt: str) -> np.nd
 
     elif fmt == "BGR":
         arr = np.frombuffer(view, np.uint8).reshape((height, width, 3))
-        # Fastest way to channel-swap (avoid temporary copy)
-        return arr[..., [2, 1, 0]]
+        # Swap channels without copying using a slice view
+        return arr[..., ::-1]
 
     elif fmt in ("RGBx", "xRGB"):
         arr = np.frombuffer(view, np.uint8).reshape((height, width, 4))
@@ -40,7 +40,8 @@ def _to_rgb_array(info: Gst.MapInfo, width: int, height: int, fmt: str) -> np.nd
 
     elif fmt in ("BGRx", "xBGR"):
         arr = np.frombuffer(view, np.uint8).reshape((height, width, 4))
-        return arr[..., [2, 1, 0]]  # Equivalent to [:3][..., ::-1] but faster
+        # Drop alpha and swap with a zero-copy slice
+        return arr[..., 2::-1]
 
     elif fmt == "RGBA":
         arr = np.frombuffer(view, np.uint8).reshape((height, width, 4))
@@ -48,7 +49,8 @@ def _to_rgb_array(info: Gst.MapInfo, width: int, height: int, fmt: str) -> np.nd
 
     elif fmt == "BGRA":
         arr = np.frombuffer(view, np.uint8).reshape((height, width, 4))
-        return arr[..., [2, 1, 0]]
+        # Discard alpha channel and reverse order via view
+        return arr[..., 2::-1]
 
     elif fmt == "RGB16":
         arr = np.frombuffer(view, np.uint16).reshape((height, width, 3))
@@ -56,7 +58,8 @@ def _to_rgb_array(info: Gst.MapInfo, width: int, height: int, fmt: str) -> np.nd
 
     elif fmt == "BGR16":
         arr = np.frombuffer(view, np.uint16).reshape((height, width, 3))
-        return arr[..., [2, 1, 0]]
+        # 16-bit channel swap using slicing for a view
+        return arr[..., ::-1]
 
     raise ValueError(f"Unsupported pixel format: {fmt}")
 

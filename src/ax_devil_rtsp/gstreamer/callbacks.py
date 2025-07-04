@@ -34,7 +34,7 @@ class CallbackHandlerMixin:
         self.video_proc_fn: Optional[callable] = None
         self.shared_cfg: Dict[str, Any] = {}
         self.latest_rtp_data: Optional[Dict[str, Any]] = None
-        self._xml_acc: bytes = b""
+        self._xml_acc: bytesarray = bytearray()
         self._timer: Optional[threading.Timer] = None
         self._timeout: Optional[float] = None
 
@@ -194,7 +194,7 @@ class CallbackHandlerMixin:
             self._report_error("Application Data Sample", "No sample received from application data sink")
             return Gst.FlowReturn.ERROR
         self.application_data_cnt += 1
-
+        
         buf = sample.get_buffer()
         ok, info = _map_buffer(buf)
         if not ok:
@@ -213,7 +213,7 @@ class CallbackHandlerMixin:
             self._report_error("RTP Header", f"Incomplete RTP header: expected {hdr_len} bytes, got {len(raw)}")
             return Gst.FlowReturn.ERROR
         marker = bool(raw[1] & 0x80)
-        self._xml_acc += raw[hdr_len:]
+        self._xml_acc.extend(raw[hdr_len:])
 
         if not marker:
             return Gst.FlowReturn.OK
@@ -221,18 +221,18 @@ class CallbackHandlerMixin:
         start = self._xml_acc.find(b"<")
         if start < 0:
             self._report_error("XML Parse", "XML start marker '<' not found in accumulated data")
-            self._xml_acc = b""
+            self._xml_acc = bytearray()
             return Gst.FlowReturn.OK
 
         try:
             xml = self._xml_acc[start:].decode('utf-8')
         except Exception as e:
             self._report_error("XML Decode", f"Failed to decode XML: {e}", e)
-            self._xml_acc = b""
+            self._xml_acc = bytearray()
             return Gst.FlowReturn.OK
 
         self.xml_cnt += 1
-        self._xml_acc = b""
+        self._xml_acc = bytearray()
         payload = {'data': xml, 'diagnostics': self._application_data_diag()}
         if self.application_data_cb:
             logger.debug(f"Calling application_data_cb (count={self.application_data_cnt})")
