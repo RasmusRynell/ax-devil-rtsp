@@ -38,7 +38,7 @@ Documentation = "https://github.com/rasmusrynell/ax-devil-rtsp#readme"
 "Bug Tracker" = "https://github.com/rasmusrynell/ax-devil-rtsp/issues"
 
 [project.scripts]
-ax-devil-rtsp = "ax_devil_rtsp.examples.cli:cli"
+ax-devil-rtsp = "ax_devil_rtsp.cli:cli"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -51,7 +51,10 @@ markers = [
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-packages = ["ax_devil_rtsp", "ax_devil_rtsp.examples"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["ax_devil_rtsp*"]
 
 [tool.black]
 line-length = 88

@@ -19,18 +19,19 @@ from ..utils import build_axis_rtsp_url
 
 
 def simple_video_processing_example(
-    frame: np.ndarray, shared_config: dict
+    payload: dict, shared_config: dict
 ) -> np.ndarray:
     """
     Example video processing function that demonstrates the video_processing_fn feature.
     Adds a timestamp overlay and optionally applies brightness adjustment.
     """
+    frame = payload["data"]
     processed = frame.copy()
 
     # Add timestamp overlay
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     cv2.putText(
-        processed, timestamp, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
+        processed, "Local: " + timestamp, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
     )
 
     # Apply brightness adjustment if configured
@@ -44,6 +45,18 @@ def simple_video_processing_example(
     cv2.putText(
         processed, frame_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1
     )
+
+    ntp_time = payload.get("latest_rtp_data", {}).get("human_time")
+    if ntp_time:
+        cv2.putText(
+            processed,
+            f"NTP: {ntp_time}",
+            (10, 90),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 255),
+            1,
+        )
 
     return processed
 

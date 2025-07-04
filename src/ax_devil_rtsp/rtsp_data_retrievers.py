@@ -24,7 +24,7 @@ from abc import ABC
 import os
 import traceback
 
-from .gstreamer_data_grabber import CombinedRTSPClient
+from .gstreamer import CombinedRTSPClient
 
 # IMPORTANT: Always use 'spawn' start method for multiprocessing to ensure
 # compatibility between parent and GStreamer subprocesses, and to avoid
