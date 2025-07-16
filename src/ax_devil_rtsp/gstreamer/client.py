@@ -64,6 +64,9 @@ class CombinedRTSPClient(CallbackHandlerMixin, DiagnosticMixin, PipelineSetupMix
         self.video_proc_fn = video_processing_fn
         self.shared_cfg = shared_config or {}
 
+        self.video_branch_enabled = video_frame_callback is not None or video_processing_fn is not None
+        self.application_data_branch_enabled = application_data_callback is not None
+
         # Initialize GStreamer
         Gst.init(None)
         self.loop = GLib.MainLoop()

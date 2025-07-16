@@ -59,10 +59,16 @@ class CallbackHandlerMixin:
 
         media = struct.get_string("media") or ""
         if media.lower() == "application":
-            self._ensure_application_data_branch()
-            sink_pad = self.m_jit.get_static_pad('sink')
+            if self.application_data_branch_enabled:
+                self._ensure_application_data_branch()
+                sink_pad = self.m_jit.get_static_pad('sink') if self.m_jit else None
+            else:
+                sink_pad = None
         else:
-            sink_pad = self.v_depay.get_static_pad('sink')
+            if self.video_branch_enabled:
+                sink_pad = self.v_depay.get_static_pad('sink') if self.v_depay else None
+            else:
+                sink_pad = None
 
         if sink_pad and not sink_pad.is_linked():
             pad.link(sink_pad)
