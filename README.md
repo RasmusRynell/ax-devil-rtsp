@@ -87,6 +87,10 @@ export AX_DEVIL_TARGET_USER=<username>
 export AX_DEVIL_TARGET_PASS=<password>
 export AX_DEVIL_USAGE_CLI="safe" # Set to "unsafe" to skip SSL certificate verification for CLI calls
 ```
+---
+> Note on GI/GStreamer
+>
+> On Linux, `PyGObject` and GStreamer are system packages. Install them with your distro package manager before using this library (see Development Setup below). If they are missing, the library will show a clear error with install instructions.
 
 ---
 
@@ -107,7 +111,7 @@ def frame_callback(frame, rtp_info):
 # Initialize video client with context manager
 rtsp_url = "rtsp://username:password@192.168.1.90/axis-media/media.amp"
 client = VideoGStreamerClient(rtsp_url, latency=100, frame_handler_callback=frame_callback)
-client.start()  # Starts streaming in current thread
+client.start()
 
 # Metadata Streaming Example
 def metadata_callback(xml_text):
@@ -149,10 +153,14 @@ ax-devil-rtsp metadata --ip 192.168.1.90 --username admin --password secret
 
 ---
 
-## ⚠️ Disclaimer
-
-This project is an independent, community-driven implementation and is **not** affiliated with or endorsed by Axis Communications AB. For official APIs and development resources, please refer to [Axis Developer Community](https://www.axis.com/en-us/developer).
+---
 
 ## 📄 License
 
 MIT License - See LICENSE file for details.
+
+---
+
+## ⚠️ Disclaimer
+
+This project is independent and not affiliated with Axis Communications AB. For official resources, visit [Axis developer documentation](https://developer.axis.com/).

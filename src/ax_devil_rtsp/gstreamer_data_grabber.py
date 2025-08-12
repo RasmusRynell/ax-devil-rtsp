@@ -7,14 +7,15 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
 import cv2
-import gi
 import numpy as np
 
 from .utils import parse_session_metadata
+from .deps import ensure_gi_ready
 
-gi.require_version("Gst", "1.0")
-gi.require_version("GstRtp", "1.0")
-from gi.repository import Gst, GstRtp, GLib, GstRtsp
+# Fail fast with clear guidance if GI/GStreamer is not available
+ensure_gi_ready()
+import gi  # type: ignore
+from gi.repository import Gst, GstRtp, GLib, GstRtsp  # type: ignore
 
 logger = logging.getLogger("ax-devil-rtsp.CombinedRTSPClient")
 

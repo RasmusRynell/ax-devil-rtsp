@@ -4,15 +4,15 @@ from datetime import datetime, timezone
 from typing import Callable, Optional, Dict, Any
 import multiprocessing
 
-import gi
+import gi  # type: ignore
 import numpy as np
 import cv2
 
 from ..utils import parse_session_metadata
+from ..deps import ensure_gi_ready
 
-gi.require_version('Gst', '1.0')
-gi.require_version('GstRtp', '1.0')
-from gi.repository import Gst, GstRtp, GLib
+ensure_gi_ready()
+from gi.repository import Gst, GstRtp, GLib  # type: ignore
 
 logger = logging.getLogger("ax-devil-rtsp.VideoGStreamerClient")
 
@@ -74,10 +74,10 @@ class VideoGStreamerClient:
         self._build_pipeline()
 
         # Initialize time spent metrics.
-        self.time_spent_rtp_probe = None
-        self.time_spent_sample = None
-        self.time_spent_custom_fn = None
-        self.time_spent_callback = None
+        self.time_spent_rtp_probe: float = 0.0
+        self.time_spent_sample: float = 0.0
+        self.time_spent_custom_fn: float = 0.0
+        self.time_spent_callback: float = 0.0
 
     def _build_pipeline(self) -> None:
         """
@@ -511,7 +511,7 @@ if __name__ == "__main__":
     )
 
     multiprocessing.set_start_method("spawn", force=True)
-    frame_queue = multiprocessing.Queue()
+    frame_queue: multiprocessing.Queue = multiprocessing.Queue()
 
     # Create a shared configuration using a Manager dict.
     manager = multiprocessing.Manager()

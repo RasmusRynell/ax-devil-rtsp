@@ -5,6 +5,8 @@ import multiprocessing as mp
 import cv2
 import urllib.parse
 
+from ..deps import ensure_gi_ready
+ensure_gi_ready()
 from ..gstreamer_data_grabber import CombinedRTSPClient
 
 

@@ -1,11 +1,13 @@
-import gi
+import gi  # type: ignore
 import time
 import logging
 import multiprocessing
 from typing import Callable, Optional, Dict, Any
 
+from ..deps import ensure_gi_ready
+ensure_gi_ready()
 gi.require_version('Gst', '1.0')
-from gi.repository import Gst, GLib
+from gi.repository import Gst, GLib  # type: ignore
 
 logger = logging.getLogger("ax-devil-rtsp.SceneMetadataClient")
 
@@ -278,7 +280,7 @@ if __name__ == "__main__":
     )
 
     multiprocessing.set_start_method("spawn", force=True)
-    xml_queue = multiprocessing.Queue()
+    xml_queue: multiprocessing.Queue = multiprocessing.Queue()
 
     username = "username"
     password = "password"
