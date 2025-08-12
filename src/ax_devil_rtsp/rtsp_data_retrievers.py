@@ -24,7 +24,7 @@ from abc import ABC
 import os
 import traceback
 
-from .gstreamer import CombinedRTSPClient
+from .deps import ensure_gi_ready
 
 # IMPORTANT: Always use 'spawn' start method for multiprocessing to ensure
 # compatibility between parent and GStreamer subprocesses, and to avoid
@@ -101,7 +101,11 @@ def _client_process(
             time.sleep(1)
 
     try:
+        # Validate GI/GStreamer availability in the subprocess for clear user feedback
+        ensure_gi_ready()
         logger.info(f"CombinedRTSPClient subprocess starting for {rtsp_url}")
+        # Import here to avoid top-level GI dependency at library import time
+        from .gstreamer import CombinedRTSPClient
         def video_cb(payload):
             queue.put({"kind": "video", **payload})
         def application_data_cb(payload):
@@ -132,7 +136,13 @@ def _client_process(
         traceback.print_exc()
         # Optionally, put an error on the queue so the parent sees it
         if queue:
-            queue.put({"kind": "error", "exception": str(exc), "traceback": traceback.format_exc()})
+            queue.put({
+                "kind": "error",
+                "error_type": "Initialization",
+                "message": str(exc),
+                "exception": str(exc),
+                "traceback": traceback.format_exc(),
+            })
         sys.exit(1)
 
 

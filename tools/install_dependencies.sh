@@ -61,9 +61,8 @@ sudo apt-get install -y \
 echo "🖥️ Installing display server for testing..."
 sudo apt-get install -y xvfb
 
-# Install Python dependencies for PyGObject
-echo "🐍 Installing Python PyGObject dependencies..."
-pip install pycairo PyGObject
+# PyGObject is expected to come from system packages on Linux; do not install via pip by default.
+echo "🐍 Skipping pip install of PyGObject; using system packages instead."
 
 # Install project dependencies
 echo "📚 Installing project dependencies..."

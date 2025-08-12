@@ -17,14 +17,14 @@ def test_import(name, description, extra_check=None):
     try:
         if name == "gi_gstreamer":
             # Special case for GStreamer - test the full import chain
-            import gi
+            import gi  # type: ignore
             print(f"  ├─ gi: ✅ (version: {getattr(gi, '__version__', 'unknown')})")
             
             gi.require_version("Gst", "1.0")
             gi.require_version("GstRtspServer", "1.0")
             print(f"  ├─ gi.require_version: ✅")
             
-            from gi.repository import Gst, GstRtspServer, GLib
+            from gi.repository import Gst, GstRtspServer, GLib  # type: ignore
             print(f"  ├─ Gst: ✅")
             print(f"  ├─ GstRtspServer: ✅") 
             print(f"  └─ GLib: ✅")
@@ -102,11 +102,14 @@ def main():
             if failed == "cv2":
                 print(f"   • Install OpenCV: pip install opencv-python")
             elif failed == "gi":
-                print(f"   • Install PyGObject: pip install PyGObject")
-                print(f"   • On Ubuntu: apt-get install python3-gi python3-gi-cairo gir1.2-gtk-3.0")
+                print("   • Install PyGObject via your distro's package manager:")
+                print("     - Ubuntu/Debian: sudo apt install python3-gi gobject-introspection")
+                print("     - Fedora/RHEL: sudo dnf install python3-gobject gobject-introspection")
+                print("     - Arch: sudo pacman -S python-gobject gobject-introspection")
             elif failed == "gi_gstreamer":
-                print(f"   • Install GStreamer dev packages")
-                print(f"   • On Ubuntu: apt-get install gstreamer1.0-dev gstreamer1.0-plugins-*")
+                print("   • Install GStreamer and introspection packages:")
+                print("     - Ubuntu/Debian: sudo apt install gstreamer1.0-dev gstreamer1.0-plugins-\\{base,good,bad,ugly\\} gstreamer1.0-libav gir1.2-gstreamer-1.0")
+                print("     - Fedora/RHEL: sudo dnf install gstreamer1-plugins-\\{base,good,bad,ugly\\}-freeworld gstreamer1-libav gobject-introspection")
         
         return 1
     else:

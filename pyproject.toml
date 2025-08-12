@@ -15,7 +15,6 @@ authors = [
 dependencies = [
     "numpy>=1.20.0",
     "opencv-python>=4.5.0",
-    "PyGObject>=3.52.3",
     "click>=8.0.0",
     "rich>=13.9.4",
     "urllib3>=2.5.0",

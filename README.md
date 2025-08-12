@@ -106,7 +106,7 @@ def on_error(payload):
 
 def main():
     # Build the RTSP URL or supply one directly
-    # rtsp_url = "rtsp://username:password@192.168.1.90/axis-media/media.amp?analytics=1"
+    # rtsp_url = "rtsp://username:password@192.168.1.90/axis-media/media.amp?analytics=polygon"
     rtsp_url = build_axis_rtsp_url(
         ip="192.168.1.90",
         username="username",
@@ -114,7 +114,7 @@ def main():
         video_source=1,
         get_video_data=True,
         get_application_data=True,
-        rtp_ext=True,  # Enable RTP extension (default: True)
+        rtp_ext=True,  # Enable RTP extension data
         resolution="640x480",
     )
 
@@ -137,11 +137,52 @@ if __name__ == "__main__":
     main()
 ```
 > **Note**
-> 
+>
 > Because `ax-devil-rtsp` forces the multiprocessing start method to `'spawn'`,
 > your script's entry point must be guarded with
 > `if __name__ == "__main__":` (as shown above). On Windows also call
 > `multiprocessing.freeze_support()` before starting the retriever.
+
+#### Video-only and application-data-only
+
+```python
+from ax_devil_rtsp import (
+    RtspVideoDataRetriever,
+    RtspApplicationDataRetriever,
+    build_axis_rtsp_url,
+)
+
+# Video-only
+video_url = build_axis_rtsp_url(
+    ip="192.168.1.90",
+    username="username",
+    password="password",
+    video_source=1,
+    get_video_data=True,
+    get_application_data=False,
+    rtp_ext=True,
+)
+with RtspVideoDataRetriever(
+    rtsp_url=video_url,
+    on_video_data=lambda p: print(p["diagnostics"]),
+):
+    ...
+
+# Application data only
+app_url = build_axis_rtsp_url(
+    ip="192.168.1.90",
+    username="username",
+    password="password",
+    video_source=1,
+    get_video_data=False,
+    get_application_data=True,
+    rtp_ext=True,
+)
+with RtspApplicationDataRetriever(
+    rtsp_url=app_url,
+    on_application_data=lambda p: print(len(p["data"]))
+):
+    ...
 
 ### CLI Usage
 
@@ -160,7 +201,7 @@ ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret
 
 **Using a complete RTSP URL:**
 ```bash
-ax-devil-rtsp url "rtsp://admin:secret@192.168.1.90/axis-media/media.amp?analytics=1"
+ax-devil-rtsp url "rtsp://admin:secret@192.168.1.90/axis-media/media.amp?analytics=polygon"
 ```
 
 **Common Options:**
@@ -185,6 +226,8 @@ ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret --only
 ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret --no-rtp-ext
 ```
 
+For demo processing and lifecycle control, see: `--enable-video-processing`, `--brightness-adjustment`, and `--manual-lifecycle` (run `ax-devil-rtsp device --help`).
+
 ### Environment Variables (Optional)
 
 ```bash
@@ -195,6 +238,7 @@ export AX_DEVIL_USAGE_CLI=safe  # Set to "unsafe" to skip SSL verification
 ```
 Set these variables to avoid passing `--ip`, `--username`, or `--password` each
 time you invoke the `device` command.
+`AX_DEVIL_USAGE_CLI` is shared with related `ax-devil-*` tools and kept here for consistency.
 
 ---
 
@@ -213,19 +257,10 @@ USE_REAL_CAMERA=true AX_DEVIL_TARGET_ADDR=192.168.1.90 pytest tests/integration/
 
 ---
 
-## 🛠️ Development Setup
-
-### System Requirements
-
-**Linux (Ubuntu/Debian):**
-```bash
-sudo apt-get update && sudo apt-get install -y \
-  libgirepository-2.0-dev gobject-introspection libcairo2-dev libffi-dev pkg-config gcc libglib2.0-dev \
-  gstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools \
-  gstreamer1.0-rtsp libgstrtspserver-1.0-0 \
-  gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gir1.2-gst-rtsp-server-1.0
-```
+> Note on GI/GStreamer
+>
+> On Linux, `PyGObject` and GStreamer are system packages. Install them with your distro package manager before using this library (see Development Setup below). If they are missing, the library will show an error with install instructions.
+ 
 
 ### Python Environment
 
