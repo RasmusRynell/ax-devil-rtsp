@@ -4,11 +4,12 @@ Diagnostic and error reporting functionality for GStreamer RTSP operations.
 
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger("ax-devil-rtsp.gstreamer.diagnostics")
+from ..logging import get_logger
+
+logger = get_logger("gstreamer.diagnostics")
 
 
 class DiagnosticMixin:

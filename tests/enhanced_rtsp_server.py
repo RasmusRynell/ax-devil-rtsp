@@ -15,9 +15,9 @@ import threading
 import time
 import xml.sax.saxutils
 from typing import Optional
-import logging
+from ax_devil_rtsp.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("enhanced_rtsp_server")
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GstRtspServer", "1.0") 

@@ -4,7 +4,6 @@ Main GStreamer RTSP client implementation.
 
 from __future__ import annotations
 
-import logging
 import sys
 import threading
 import time
@@ -20,18 +19,9 @@ from .callbacks import CallbackHandlerMixin
 from .diagnostics import DiagnosticMixin
 from .pipeline import PipelineSetupMixin
 
-# Configure basic logging only when run as a standalone script. When this
-# module is imported (e.g. through the high level retrievers) logging should
-# be configured by the parent application so that options like `--log-level`
-# work as expected.
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        stream=sys.stdout,
-    )
+from ..logging import get_logger
 
-logger = logging.getLogger("ax-devil-rtsp.CombinedRTSPClient")
+logger = get_logger("gstreamer.client")
 
 
 class CombinedRTSPClient(CallbackHandlerMixin, DiagnosticMixin, PipelineSetupMixin):

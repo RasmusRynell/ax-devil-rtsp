@@ -4,8 +4,11 @@ GStreamer pipeline setup and element creation functionality.
 
 from __future__ import annotations
 
-import logging
 from typing import Optional
+
+from ..logging import get_logger
+
+logger = get_logger("gstreamer.pipeline")
 
 import gi
 
@@ -13,7 +16,6 @@ gi.require_version("Gst", "1.0")
 gi.require_version("GstRtsp", "1.0")
 from gi.repository import Gst, GstRtsp
 
-logger = logging.getLogger("ax-devil-rtsp.gstreamer.pipeline")
 
 
 class PipelineSetupMixin:

@@ -4,7 +4,6 @@ Utility functions for GStreamer RTSP operations.
 
 from __future__ import annotations
 
-import logging
 import multiprocessing as mp
 from typing import Any, Callable, Dict, Optional
 
@@ -14,7 +13,9 @@ import numpy as np
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
-logger = logging.getLogger("ax-devil-rtsp.gstreamer.utils")
+from ..logging import get_logger
+
+logger = get_logger("gstreamer.utils")
 
 
 def _map_buffer(buf: Gst.Buffer) -> tuple[bool, Gst.MapInfo]:

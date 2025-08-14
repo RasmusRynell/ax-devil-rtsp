@@ -3,11 +3,12 @@ import re
 import hashlib
 import struct
 import os
-import logging
 import threading
 from typing import Optional
 
-logger = logging.getLogger("ax-devil-rtsp.SceneMetadataRawClient")
+from ..logging import get_logger
+
+logger = get_logger("raw_socket.metadata_raw")
 
 class SceneMetadataRawClient:
     """

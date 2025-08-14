@@ -4,11 +4,14 @@ Callback handling functionality for GStreamer RTSP operations.
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+
+from ..logging import get_logger
+
+logger = get_logger("gstreamer.callbacks")
 
 import gi
 
@@ -19,7 +22,6 @@ from gi.repository import Gst, GstRtp
 from ..utils import parse_session_metadata
 from .utils import _map_buffer, _to_rgb_array
 
-logger = logging.getLogger("ax-devil-rtsp.gstreamer.callbacks")
 
 
 class CallbackHandlerMixin:

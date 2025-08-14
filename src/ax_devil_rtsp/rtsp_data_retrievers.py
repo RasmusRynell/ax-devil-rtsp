@@ -15,7 +15,6 @@ Note:
     Always call stop() or use the context manager to ensure resources are cleaned up.
 """
 
-import logging
 import multiprocessing as mp
 import threading
 import queue as queue_mod
@@ -23,6 +22,7 @@ from typing import Callable, Optional, Dict, Any, TYPE_CHECKING
 from abc import ABC
 import os
 import traceback
+import logging
 
 from .deps import ensure_gi_ready
 
@@ -49,7 +49,9 @@ else:
     ErrorCallback = Callable[[RtspPayload], None]
     SessionStartCallback = Callable[[RtspPayload], None]
 
-logger = logging.getLogger(__name__)
+from .logging import get_logger
+
+logger = get_logger("rtsp_data_retrievers")
 
 __all__ = [
     "RtspPayload",
@@ -80,11 +82,8 @@ def _client_process(
     """
     import sys
     import time
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        stream=sys.stdout,
-    )
+    from .logging import setup_logging
+    setup_logging(log_level=log_level)
     parent_pid = os.getppid()
     client_should_stop = threading.Event()
 
@@ -206,7 +205,7 @@ class RtspDataRetriever(ABC):
         self._connection_timeout = connection_timeout
         self._on_error = on_error
         self._on_session_start = on_session_start
-        self._log_level = log_level if log_level is not None else logging.getLogger().getEffectiveLevel()
+        self._log_level = log_level if log_level is not None else logger.getEffectiveLevel()
 
     def start(self) -> None:
         """
