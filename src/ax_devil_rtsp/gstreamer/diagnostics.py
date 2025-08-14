@@ -14,7 +14,7 @@ logger = get_logger("gstreamer.diagnostics")
 
 class DiagnosticMixin:
     """Mixin class providing diagnostic and error reporting functionality."""
-    
+
     def __init__(self):
         # Diagnostic counters and state
         self.start_time: Optional[float] = None
@@ -52,8 +52,9 @@ class DiagnosticMixin:
     def _report_error(self, error_type: str, message: str, exception: Optional[Exception] = None) -> None:
         """Report an error through logging, counting, and callback."""
         self.err_cnt += 1
-        logger.error(f"gstreamer_data_grabber got error: {error_type}: {message}")
-        
+        logger.error(
+            f"gstreamer_data_grabber got error: {error_type}: {message}")
+
         if self.error_cb:
             error_payload = {
                 'error_type': error_type,
@@ -66,4 +67,4 @@ class DiagnosticMixin:
             try:
                 self.error_cb(error_payload)
             except Exception as cb_error:
-                logger.error("Error callback failed: %s", cb_error) 
+                logger.error("Error callback failed: %s", cb_error)

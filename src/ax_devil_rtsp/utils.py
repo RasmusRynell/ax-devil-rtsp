@@ -11,10 +11,10 @@ logger = get_logger("utils")
 def parse_axis_scene_metadata_xml(xml_data: bytes) -> dict:
     """
     Parse ONVIF Scene metadata XML and extract relevant information.
-    
+
     Args:
         xml_data: Raw XML bytes data
-        
+
     Returns:
         dict: Parsed Scene metadata information
     """
@@ -23,19 +23,19 @@ def parse_axis_scene_metadata_xml(xml_data: bytes) -> dict:
             xml_text = xml_data.decode('utf-8')
         except UnicodeDecodeError:
             xml_text = xml_data.decode('utf-8', errors='ignore')
-            
+
         root = ET.fromstring(xml_text)
         result: Dict[str, Any] = {
             'objects': [],
             'utc_time': None,
             'raw_xml': xml_text
         }
-        
+
         ns = {
             "tt": "http://www.onvif.org/ver10/schema",
             "bd": "http://www.onvif.org/ver20/analytics/humanbody"
         }
-        
+
         # Extract objects
         for obj in root.findall('.//tt:Object', ns):
             obj_id = obj.get('ObjectId')
@@ -45,16 +45,16 @@ def parse_axis_scene_metadata_xml(xml_data: bytes) -> dict:
                     'id': obj_id,
                     'type': type_elem.text
                 })
-                
+
         # Extract frame time
         for frame in root.findall('.//tt:Frame', ns):
             utc_time = frame.get('UtcTime')
             if utc_time:
                 result['utc_time'] = utc_time
                 break
-                
+
         return result
-        
+
     except ET.ParseError as e:
         logger.error("XML Parse Error: %s", e)
         return {
@@ -72,7 +72,8 @@ def _parse_caps_string(caps_str: str) -> Dict[str, Any]:
     Respects GStreamer’s escape for commas (\\,).
     """
     # Split on commas not preceded by a backslash
-    parts = re.split(r'(?<!\\),\s*', caps_str)  # negative lookbehind :contentReference[oaicite:1]{index=1}
+    # negative lookbehind :contentReference[oaicite:1]{index=1}
+    parts = re.split(r'(?<!\\),\s*', caps_str)
     result: Dict[str, Any] = {}
     for part in parts:
         # Match key=(type)value
@@ -137,7 +138,7 @@ def build_axis_rtsp_url(
     get_video_data: bool,
     get_application_data: bool,
     rtp_ext: bool,
-    resolution: str = None, # Will let the device decide what the resolution should be
+    resolution: str = None,  # Will let the device decide what the resolution should be
 ) -> str:
     """
     Build an RTSP URL for Axis cameras.
@@ -145,7 +146,8 @@ def build_axis_rtsp_url(
     if not ip:
         raise ValueError("No IP address provided.")
     if not get_video_data and not get_application_data:
-        raise ValueError("At least one of get_video_data or get_application_data must be True.")
+        raise ValueError(
+            "At least one of get_video_data or get_application_data must be True.")
     cred = f"{username}:{password}@" if username or password else ""
     url = f"rtsp://{cred}{ip}/axis-media/media.amp"
     params = {}
@@ -163,4 +165,3 @@ def build_axis_rtsp_url(
         query_string = urllib.parse.urlencode(params)
         url += "?" + query_string
     return url
-

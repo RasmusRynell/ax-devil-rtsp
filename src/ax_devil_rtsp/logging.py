@@ -31,7 +31,8 @@ class _ColorFormatter(_logging.Formatter):
 
     def format(self, record: _logging.LogRecord) -> str:  # noqa: D401, N802
         color = _COLORS.get(record.levelname, "")
-        time_str = _dt.datetime.fromtimestamp(record.created).strftime("%H:%M:%S.%f")[:-3]
+        time_str = _dt.datetime.fromtimestamp(
+            record.created).strftime("%H:%M:%S.%f")[:-3]
         module_line = f"{record.module}:{record.lineno}"
         message = super().formatMessage(record)
         return f"{color}{time_str} | {record.levelname:<8} | {module_line:<20} | {message}{_RESET}"
@@ -118,7 +119,8 @@ def setup_logging(
 
     if debug:
         log_level = "DEBUG"
-    numeric_level = _logging._nameToLevel.get(str(log_level).upper(), _logging.INFO)
+    numeric_level = _logging._nameToLevel.get(
+        str(log_level).upper(), _logging.INFO)
 
     if logs_dir is None:
         logs_path = _get_default_logs_dir()
@@ -133,7 +135,8 @@ def setup_logging(
 
     root = _logging.getLogger()
     root.handlers.clear()
-    root.setLevel(_logging.DEBUG)  # capture everything; handlers decide display
+    # capture everything; handlers decide display
+    root.setLevel(_logging.DEBUG)
 
     # ─ JSON file handler ───────────────────────────────────────────────────────
     json_handler = _handlers.RotatingFileHandler(

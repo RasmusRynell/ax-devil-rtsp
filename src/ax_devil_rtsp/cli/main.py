@@ -32,7 +32,8 @@ def simple_video_processing_example(
     # Add timestamp overlay
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     cv2.putText(
-        processed, "Local: " + timestamp, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
+        processed, "Local: " +
+        timestamp, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
     )
 
     # Apply brightness adjustment if configured
@@ -44,7 +45,8 @@ def simple_video_processing_example(
     shared_config["frame_count"] = shared_config.get("frame_count", 0) + 1
     frame_text = f"Frame: {shared_config['frame_count']}"
     cv2.putText(
-        processed, frame_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1
+        processed, frame_text, (10,
+                                60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1
     )
 
     ntp_time = payload.get("latest_rtp_data", {}).get("human_time")
@@ -74,18 +76,18 @@ def _display_loop(video_frames, args, retriever, logger):
         return
 
     logger.info("Starting video display...")
-    
+
     while retriever.is_running:
         try:
             frame = video_frames.get(timeout=0.1)
             if frame is not None:
                 cv2.imshow("RTSP Stream", frame)
-                
+
             # Check for 'q' key to quit
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 logger.info("User pressed 'q' to quit")
                 break
-                
+
         except queue.Empty:
             continue
         except KeyboardInterrupt:
@@ -94,7 +96,7 @@ def _display_loop(video_frames, args, retriever, logger):
         except Exception as e:
             logger.error(f"Error in display loop: {e}")
             break
-    
+
     cv2.destroyAllWindows()
 
 
@@ -152,7 +154,8 @@ def main(**kwargs):
         error_type = payload.get("error_type", "Unknown")
         message = payload.get("message", "Unknown error")
         error_count = payload.get("error_count", 0)
-        logger.error(f"[ERROR] {error_type}: {message} (total errors: {error_count})")
+        logger.error(
+            f"[ERROR] {error_type}: {message} (total errors: {error_count})")
 
     # Set up video processing if requested
     video_processing_fn = None
@@ -168,16 +171,16 @@ def main(**kwargs):
             f"{args.brightness_adjustment}"
         )
 
-
     retriever_classes = {
         (True, False): (RtspVideoDataRetriever, "video-only retriever"),
         (False, True): (RtspApplicationDataRetriever, "application data-only retriever"),
         (False, False): (RtspDataRetriever, "combined video+application data retriever")
     }
-    
-    retriever_class, desc = retriever_classes[(args.only_video, args.only_application_data)]
+
+    retriever_class, desc = retriever_classes[(
+        args.only_video, args.only_application_data)]
     logger.info(f"[DEMO] Using {retriever_class.__name__} ({desc})")
-    
+
     # Build kwargs based on retriever class signature
     kwargs = {
         "rtsp_url": rtsp_url,
@@ -188,7 +191,7 @@ def main(**kwargs):
         "shared_config": shared_config,
         "connection_timeout": args.connection_timeout,
     }
-    
+
     # Add class-specific callback arguments
     if retriever_class is RtspVideoDataRetriever:
         kwargs["on_video_data"] = on_video_data
@@ -197,24 +200,27 @@ def main(**kwargs):
     else:  # RtspDataRetriever
         kwargs["on_video_data"] = on_video_data
         kwargs["on_application_data"] = on_application_data
-    
+
     retriever = retriever_class(**kwargs)
 
     try:
-        logger.info(f"[DEMO] Using {'manual lifecycle' if args.manual_lifecycle else 'context manager'}")
-        
+        logger.info(
+            f"[DEMO] Using {'manual lifecycle' if args.manual_lifecycle else 'context manager'}")
+
         if args.manual_lifecycle:
             retriever.start()
             logger.info("RTSP Data Retriever started manually")
             try:
-                logger.info("Press Ctrl+C to stop, or 'q' in video window to quit")
+                logger.info(
+                    "Press Ctrl+C to stop, or 'q' in video window to quit")
                 _display_loop(video_frames, args, retriever, logger)
             finally:
                 retriever.stop()
         else:
             with retriever:
                 logger.info("RTSP Data Retriever started")
-                logger.info("Press Ctrl+C to stop, or 'q' in video window to quit")
+                logger.info(
+                    "Press Ctrl+C to stop, or 'q' in video window to quit")
                 _display_loop(video_frames, args, retriever, logger)
     except KeyboardInterrupt:
         logger.info("Interrupted by user")

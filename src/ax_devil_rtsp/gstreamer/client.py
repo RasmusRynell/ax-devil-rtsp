@@ -3,6 +3,11 @@ Main GStreamer RTSP client implementation.
 """
 
 from __future__ import annotations
+from ..logging import get_logger
+from .pipeline import PipelineSetupMixin
+from .diagnostics import DiagnosticMixin
+from .callbacks import CallbackHandlerMixin
+from gi.repository import Gst, GLib
 
 import sys
 import threading
@@ -13,13 +18,7 @@ import gi
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GLib", "2.0")
-from gi.repository import Gst, GLib
 
-from .callbacks import CallbackHandlerMixin
-from .diagnostics import DiagnosticMixin
-from .pipeline import PipelineSetupMixin
-
-from ..logging import get_logger
 
 logger = get_logger("gstreamer.client")
 
@@ -32,11 +31,15 @@ class CombinedRTSPClient(CallbackHandlerMixin, DiagnosticMixin, PipelineSetupMix
         rtsp_url: str,
         *,
         latency: int = 100,
-        video_frame_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        application_data_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        stream_session_metadata_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        video_frame_callback: Optional[Callable[[
+            Dict[str, Any]], None]] = None,
+        application_data_callback: Optional[Callable[[
+            Dict[str, Any]], None]] = None,
+        stream_session_metadata_callback: Optional[Callable[[
+            Dict[str, Any]], None]] = None,
         error_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        video_processing_fn: Optional[Callable[[Dict[str, Any], dict], Any]] = None,
+        video_processing_fn: Optional[Callable[[
+            Dict[str, Any], dict], Any]] = None,
         shared_config: Optional[dict] = None,
         timeout: Optional[float] = None,
     ) -> None:
@@ -80,7 +83,8 @@ class CombinedRTSPClient(CallbackHandlerMixin, DiagnosticMixin, PipelineSetupMix
             raise RuntimeError("Unable to set pipeline to PLAYING state")
         try:
             if self._timeout:
-                self._timer = threading.Timer(self._timeout, self._timeout_handler)
+                self._timer = threading.Timer(
+                    self._timeout, self._timeout_handler)
                 self._timer.start()
             logger.debug("Starting main loop")
             self.loop.run()
@@ -105,4 +109,4 @@ class CombinedRTSPClient(CallbackHandlerMixin, DiagnosticMixin, PipelineSetupMix
         return self
 
     def __exit__(self, *_exc) -> None:
-        self.stop() 
+        self.stop()

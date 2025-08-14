@@ -3,6 +3,8 @@ GStreamer pipeline setup and element creation functionality.
 """
 
 from __future__ import annotations
+from gi.repository import Gst, GstRtsp
+import gi
 
 from typing import Optional
 
@@ -10,17 +12,14 @@ from ..logging import get_logger
 
 logger = get_logger("gstreamer.pipeline")
 
-import gi
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GstRtsp", "1.0")
-from gi.repository import Gst, GstRtsp
-
 
 
 class PipelineSetupMixin:
     """Mixin class providing GStreamer pipeline setup functionality."""
-    
+
     def __init__(self):
         # These should be set by the concrete class
         self.pipeline: Optional[Gst.Pipeline] = None
@@ -52,7 +51,7 @@ class PipelineSetupMixin:
         src.props.latency = self.latency
         src.props.protocols = (GstRtsp.RTSPLowerTrans.TCP |
                                GstRtsp.RTSPLowerTrans.UDP)
-        
+
         # Be stricter about timeout handling
         src.props.tcp_timeout = 100_000_000     # µs until we declare the server dead
 
@@ -79,7 +78,8 @@ class PipelineSetupMixin:
         if not all(elems.values()):
             raise RuntimeError("Failed to create one or more video elements")
 
-        elems['v_caps'].props.caps = Gst.Caps.from_string("video/x-raw,format=RGB")
+        elems['v_caps'].props.caps = Gst.Caps.from_string(
+            "video/x-raw,format=RGB")
         elems['v_sink'].props.emit_signals = True
         elems['v_sink'].props.sync = False
         elems['v_sink'].connect("new-sample", self._on_new_video_sample)
@@ -87,7 +87,8 @@ class PipelineSetupMixin:
         for el in elems.values():
             self.pipeline.add(el)
 
-        link_order = ['v_depay', 'v_parse', 'v_dec', 'v_conv', 'v_caps', 'v_sink']
+        link_order = ['v_depay', 'v_parse',
+                      'v_dec', 'v_conv', 'v_caps', 'v_sink']
         for src_name, dst_name in zip(link_order, link_order[1:]):
             if not elems[src_name].link(elems[dst_name]):
                 raise RuntimeError(f"Failed to link {src_name} to {dst_name}")
@@ -108,11 +109,13 @@ class PipelineSetupMixin:
         m_caps = Gst.ElementFactory.make("capsfilter", "m_caps")
         m_sink = Gst.ElementFactory.make("appsink", "m_sink")
         if not all((m_jit, m_caps, m_sink)):
-            self._report_error("Application Data Branch", "Failed to create application data pipeline elements")
+            self._report_error("Application Data Branch",
+                               "Failed to create application data pipeline elements")
             return
 
         m_jit.props.latency = self.latency
-        m_caps.props.caps = Gst.Caps.from_string("application/x-rtp,media=application")
+        m_caps.props.caps = Gst.Caps.from_string(
+            "application/x-rtp,media=application")
         m_sink.props.emit_signals = True
         m_sink.props.sync = False
         m_sink.connect("new-sample", self._on_new_application_data_sample)
@@ -122,7 +125,8 @@ class PipelineSetupMixin:
             el.sync_state_with_parent()
 
         if not (m_jit.link(m_caps) and m_caps.link(m_sink)):
-            self._report_error("Application Data Branch", "Failed to link application data pipeline elements")
+            self._report_error("Application Data Branch",
+                               "Failed to link application data pipeline elements")
             return
 
         self.m_jit = m_jit
@@ -133,4 +137,4 @@ class PipelineSetupMixin:
         """Set up the GStreamer message bus."""
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
-        bus.connect("message", self._on_bus_message) 
+        bus.connect("message", self._on_bus_message)

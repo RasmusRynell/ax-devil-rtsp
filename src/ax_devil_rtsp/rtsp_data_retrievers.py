@@ -15,6 +15,7 @@ Note:
     Always call stop() or use the context manager to ensure resources are cleaned up.
 """
 
+from .logging import get_logger
 import multiprocessing as mp
 import threading
 import queue as queue_mod
@@ -35,12 +36,16 @@ mp.set_start_method('spawn', force=True)
 RtspPayload = Dict[str, Any]
 if TYPE_CHECKING:
     from typing import Protocol
+
     class VideoDataCallback(Protocol):
         def __call__(self, payload: RtspPayload) -> None: ...
+
     class ApplicationDataCallback(Protocol):
         def __call__(self, payload: RtspPayload) -> None: ...
+
     class ErrorCallback(Protocol):
         def __call__(self, payload: RtspPayload) -> None: ...
+
     class SessionStartCallback(Protocol):
         def __call__(self, payload: RtspPayload) -> None: ...
 else:
@@ -49,7 +54,6 @@ else:
     ErrorCallback = Callable[[RtspPayload], None]
     SessionStartCallback = Callable[[RtspPayload], None]
 
-from .logging import get_logger
 
 logger = get_logger("rtsp_data_retrievers")
 
@@ -105,12 +109,16 @@ def _client_process(
         logger.info(f"CombinedRTSPClient subprocess starting for {rtsp_url}")
         # Import here to avoid top-level GI dependency at library import time
         from .gstreamer import CombinedRTSPClient
+
         def video_cb(payload):
             queue.put({"kind": "video", **payload})
+
         def application_data_cb(payload):
             queue.put({"kind": "application_data", **payload})
+
         def session_cb(payload):
             queue.put({"kind": "session_start", **payload})
+
         def error_cb(payload):
             queue.put({"kind": "error", **payload})
         client = CombinedRTSPClient(
@@ -234,7 +242,8 @@ class RtspDataRetriever(ABC):
             ),
         )
         self._proc.start()
-        self._queue_thread = threading.Thread(target=self._queue_dispatch_loop, daemon=True)
+        self._queue_thread = threading.Thread(
+            target=self._queue_dispatch_loop, daemon=True)
         self._queue_thread.start()
         logger.info("Retriever process started.")
 
@@ -269,7 +278,7 @@ class RtspDataRetriever(ABC):
         Handles EOFError/OSError gracefully if the parent process is dead.
         Catches and logs exceptions in user callbacks to avoid breaking the loop.
         """
-        wait_time_s = 10 # TODO: Move this? make it configurable?
+        wait_time_s = 10  # TODO: Move this? make it configurable?
         MAX_EMPTY_POLLS = wait_time_s/self.QUEUE_POLL_INTERVAL
         consecutive_empty = 0
         while not self._stop_event.is_set():
@@ -284,17 +293,20 @@ class RtspDataRetriever(ABC):
                     break
                 # If the subprocess has died or was never started, exit to avoid busy-loop.
                 if self._proc is None or not self._proc.is_alive():
-                    logger.debug("Queue polling ended because retriever subprocess is not alive.")
+                    logger.debug(
+                        "Queue polling ended because retriever subprocess is not alive.")
                     break
                 # Otherwise, continue polling.
                 consecutive_empty += 1
                 if consecutive_empty >= MAX_EMPTY_POLLS:
-                    logger.debug("Queue polling ended due to excessive empty polls.")
+                    logger.debug(
+                        "Queue polling ended due to excessive empty polls.")
                     break
                 continue
             except (EOFError, OSError):
                 # Queue broken or closed due to process exit; exit the loop.
-                logger.debug("Queue polling ended due to queue closure or OS error.")
+                logger.debug(
+                    "Queue polling ended due to queue closure or OS error.")
                 break
             kind = item.get("kind")
             try:
@@ -311,7 +323,8 @@ class RtspDataRetriever(ABC):
                     logger.debug("Dispatching session_start callback.")
                     self._on_session_start(item)
             except Exception as exc:
-                logger.error(f"Exception in user callback for kind '{kind}': {exc}", exc_info=True)
+                logger.error(
+                    f"Exception in user callback for kind '{kind}': {exc}", exc_info=True)
 
     def __enter__(self) -> "RtspDataRetriever":
         """
@@ -337,11 +350,11 @@ class RtspDataRetriever(ABC):
         return self._proc is not None and self._proc.is_alive()
 
 
-
 class RtspVideoDataRetriever(RtspDataRetriever):
     """
     Retrieve only video data from an RTSP stream.
     """
+
     def __init__(
         self,
         rtsp_url: str,
@@ -372,6 +385,7 @@ class RtspApplicationDataRetriever(RtspDataRetriever):
     """
     Retrieve only application (Axis Scene Description) data from an RTSP stream.
     """
+
     def __init__(
         self,
         rtsp_url: str,

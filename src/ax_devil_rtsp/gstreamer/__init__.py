@@ -9,6 +9,6 @@ from .client import CombinedRTSPClient
 from .utils import run_combined_client_simple_example
 
 __all__ = [
-    "CombinedRTSPClient", 
+    "CombinedRTSPClient",
     "run_combined_client_simple_example"
-] 
+]

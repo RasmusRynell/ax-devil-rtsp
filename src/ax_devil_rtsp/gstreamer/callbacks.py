@@ -3,6 +3,10 @@ Callback handling functionality for GStreamer RTSP operations.
 """
 
 from __future__ import annotations
+from .utils import _map_buffer, _to_rgb_array
+from ..utils import parse_session_metadata
+from gi.repository import Gst, GstRtp
+import gi
 
 import threading
 import time
@@ -13,20 +17,14 @@ from ..logging import get_logger
 
 logger = get_logger("gstreamer.callbacks")
 
-import gi
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GstRtp", "1.0")
-from gi.repository import Gst, GstRtp
-
-from ..utils import parse_session_metadata
-from .utils import _map_buffer, _to_rgb_array
-
 
 
 class CallbackHandlerMixin:
     """Mixin class providing callback handling functionality."""
-    
+
     def __init__(self):
         # These should be set by the concrete class
         self.video_frame_cb: Optional[callable] = None
@@ -52,7 +50,8 @@ class CallbackHandlerMixin:
     def _on_pad_added(self, _src: Gst.Element, pad: Gst.Pad) -> None:
         """Handle dynamic pad addition from RTSP source."""
         caps = pad.get_current_caps()
-        logger.debug(f"Pad added: {pad.get_name()}, caps: {caps.to_string() if caps else 'None'}")
+        logger.debug(
+            f"Pad added: {pad.get_name()}, caps: {caps.to_string() if caps else 'None'}")
         if not caps:
             return
         struct = caps.get_structure(0)
@@ -63,12 +62,14 @@ class CallbackHandlerMixin:
         if media.lower() == "application":
             if self.application_data_branch_enabled:
                 self._ensure_application_data_branch()
-                sink_pad = self.m_jit.get_static_pad('sink') if self.m_jit else None
+                sink_pad = self.m_jit.get_static_pad(
+                    'sink') if self.m_jit else None
             else:
                 sink_pad = None
         else:
             if self.video_branch_enabled:
-                sink_pad = self.v_depay.get_static_pad('sink') if self.v_depay else None
+                sink_pad = self.v_depay.get_static_pad(
+                    'sink') if self.v_depay else None
             else:
                 sink_pad = None
 
@@ -143,7 +144,8 @@ class CallbackHandlerMixin:
         self._timers['vid_sample'] = time.time()
         sample = sink.emit('pull-sample')
         if not sample:
-            self._report_error("Video Sample", "No sample received from video sink")
+            self._report_error(
+                "Video Sample", "No sample received from video sink")
             return Gst.FlowReturn.ERROR
         self.video_cnt += 1
 
@@ -157,10 +159,10 @@ class CallbackHandlerMixin:
         width = struct.get_value('width')
         height = struct.get_value('height')
         fmt = struct.get_string('format')
-        
+
         # TODO: Do this fix in some better way. Also why in the world fmt can be RBG but the image is still bgr...
         fmt = "BGR"
-        
+
         try:
             frame = _to_rgb_array(info, width, height, fmt)
         except Exception as e:
@@ -179,7 +181,8 @@ class CallbackHandlerMixin:
             try:
                 payload['data'] = self.video_proc_fn(payload, self.shared_cfg)
             except Exception as e:
-                self._report_error("Video Processing", f"User processing function failed: {e}", e)
+                self._report_error("Video Processing",
+                                   f"User processing function failed: {e}", e)
             self._timers['vid_proc'] = time.time() - start
 
         payload['diagnostics'] = self._video_diag()
@@ -189,7 +192,8 @@ class CallbackHandlerMixin:
             try:
                 self.video_frame_cb(payload)
             except Exception as e:
-                self._report_error("Video Callback", f"Video frame callback failed: {e}", e)
+                self._report_error(
+                    "Video Callback", f"Video frame callback failed: {e}", e)
             self._timers['vid_cb'] = time.time() - start
 
         return Gst.FlowReturn.OK
@@ -199,26 +203,30 @@ class CallbackHandlerMixin:
         logger.debug("Received new application data sample")
         sample = sink.emit('pull-sample')
         if not sample:
-            self._report_error("Application Data Sample", "No sample received from application data sink")
+            self._report_error("Application Data Sample",
+                               "No sample received from application data sink")
             return Gst.FlowReturn.ERROR
         self.application_data_cnt += 1
-        
+
         buf = sample.get_buffer()
         ok, info = _map_buffer(buf)
         if not ok:
-            self._report_error("Application Data Buffer", "Failed to map application data buffer")
+            self._report_error("Application Data Buffer",
+                               "Failed to map application data buffer")
             return Gst.FlowReturn.ERROR
 
         raw = bytes(info.data)
         buf.unmap(info)
 
         if len(raw) < 12:
-            self._report_error("RTP Header", "RTP packet too short (< 12 bytes)")
+            self._report_error(
+                "RTP Header", "RTP packet too short (< 12 bytes)")
             return Gst.FlowReturn.ERROR
         csrc = raw[0] & 0x0F
         hdr_len = 12 + 4 * csrc
         if len(raw) < hdr_len:
-            self._report_error("RTP Header", f"Incomplete RTP header: expected {hdr_len} bytes, got {len(raw)}")
+            self._report_error(
+                "RTP Header", f"Incomplete RTP header: expected {hdr_len} bytes, got {len(raw)}")
             return Gst.FlowReturn.ERROR
         marker = bool(raw[1] & 0x80)
         self._xml_acc.extend(raw[hdr_len:])
@@ -228,7 +236,8 @@ class CallbackHandlerMixin:
 
         start = self._xml_acc.find(b"<")
         if start < 0:
-            self._report_error("XML Parse", "XML start marker '<' not found in accumulated data")
+            self._report_error(
+                "XML Parse", "XML start marker '<' not found in accumulated data")
             self._xml_acc = bytearray()
             return Gst.FlowReturn.OK
 
@@ -243,15 +252,18 @@ class CallbackHandlerMixin:
         self._xml_acc = bytearray()
         payload = {'data': xml, 'diagnostics': self._application_data_diag()}
         if self.application_data_cb:
-            logger.debug(f"Calling application_data_cb (count={self.application_data_cnt})")
+            logger.debug(
+                f"Calling application_data_cb (count={self.application_data_cnt})")
             try:
                 self.application_data_cb(payload)
             except Exception as e:
-                self._report_error("Application Data Callback", f"Application data callback failed: {e}", e)
+                self._report_error("Application Data Callback",
+                                   f"Application data callback failed: {e}", e)
         return Gst.FlowReturn.OK
 
     def _timeout_handler(self) -> None:
         """Handle timeout by stopping client."""
         logger.warning(f"Timeout reached ({self._timeout}s), stopping client")
-        self._report_error("Timeout", f"Connection timed out in {self._timeout}s")
-        self.stop() 
+        self._report_error(
+            "Timeout", f"Connection timed out in {self._timeout}s")
+        self.stop()

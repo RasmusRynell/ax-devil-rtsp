@@ -10,12 +10,13 @@ from ..logging import get_logger
 
 logger = get_logger("raw_socket.metadata_raw")
 
+
 class SceneMetadataRawClient:
     """
     A raw socket implementation of RTSP client for retrieving Axis Scene Metadata.
     This implementation avoids using GStreamer and implements the RTSP protocol directly.
     """
-    
+
     def __init__(self, rtsp_url, latency=100, raw_data_callback=None, timeout: Optional[float] = None,):
         """
         Initialize the RTSP client.
@@ -28,17 +29,18 @@ class SceneMetadataRawClient:
         self.rtsp_url = rtsp_url
         self.latency = latency
         self.raw_data_callback = raw_data_callback
-        
+
         # Extract connection details from URL
-        match = re.match(r'rtsp://(?:([^:@]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?(?:/.*)?', rtsp_url)
+        match = re.match(
+            r'rtsp://(?:([^:@]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?(?:/.*)?', rtsp_url)
         if not match:
             raise ValueError("Invalid RTSP URL format")
-            
+
         self.username = match.group(1) or ''
         self.password = match.group(2) or ''
         self.ip = match.group(3)
         self.port = int(match.group(4) or 554)
-        
+
         # RTSP state
         self.cseq = 1
         self.session_id = None
@@ -48,7 +50,6 @@ class SceneMetadataRawClient:
         self._timeout = timeout
         self._timer: Optional[None | threading.Timer] = None
 
-        
     def _connect(self):
         """Establish TCP connection to RTSP server."""
         if self.sock:
@@ -86,32 +87,37 @@ class SceneMetadataRawClient:
         qop_match = re.search(r'qop="([^"]+)"', www_auth)
         qop = qop_match.group(1) if qop_match else None
 
-        ha1 = hashlib.md5(f"{self.username}:{realm}:{self.password}".encode()).hexdigest()
+        ha1 = hashlib.md5(
+            f"{self.username}:{realm}:{self.password}".encode()).hexdigest()
         ha2 = hashlib.md5(f"{method}:{uri}".encode()).hexdigest()
 
         if qop:
             nc = "00000001"
             cnonce = os.urandom(8).hex()
-            response_hash = hashlib.md5(f"{ha1}:{nonce}:{nc}:{cnonce}:{qop}:{ha2}".encode()).hexdigest()
+            response_hash = hashlib.md5(
+                f"{ha1}:{nonce}:{nc}:{cnonce}:{qop}:{ha2}".encode()).hexdigest()
             return (f'Digest username="{self.username}", realm="{realm}", nonce="{nonce}", uri="{uri}", '
                     f'response="{response_hash}", algorithm="MD5", qop={qop}, nc={nc}, cnonce="{cnonce}"')
         else:
-            response_hash = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
+            response_hash = hashlib.md5(
+                f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
             return (f'Digest username="{self.username}", realm="{realm}", nonce="{nonce}", uri="{uri}", '
                     f'response="{response_hash}", algorithm="MD5"')
 
     def _handle_401(self, response, method, uri):
         """Handle 401 Unauthorized response."""
-        match = re.search(r'WWW-Authenticate:\s*(Digest.*)', response, re.IGNORECASE)
+        match = re.search(r'WWW-Authenticate:\s*(Digest.*)',
+                          response, re.IGNORECASE)
         if match:
             return self._compute_digest_auth(match.group(1).strip(), method, uri)
-        raise Exception("Missing WWW-Authenticate header with digest in 401 response.")
+        raise Exception(
+            "Missing WWW-Authenticate header with digest in 401 response.")
 
     def _send_rtsp(self, method, url, extra_headers=""):
         """Send RTSP request with authentication handling."""
         if not self.sock:
             self._connect()
-            
+
         req = self._build_request(method, url, extra_headers)
         response = self._send_request(req)
         if "401 Unauthorized" in response:
@@ -125,17 +131,17 @@ class SceneMetadataRawClient:
         """Handle RTP packet containing metadata."""
         if len(packet) < 12:
             return
-            
+
         marker = (packet[1] >> 7) & 0x01
         rtp_payload = packet[12:]
         self.xml_buffer += rtp_payload
-        
+
         if marker == 1:
             try:
                 xml_text = self.xml_buffer.decode('utf-8')
             except UnicodeDecodeError:
                 xml_text = self.xml_buffer.decode('utf-8', errors='ignore')
-                
+
             if xml_text and self.raw_data_callback:
                 try:
                     self.raw_data_callback(xml_text)
@@ -153,22 +159,24 @@ class SceneMetadataRawClient:
         logger.info("Starting SceneMetadataRawClient")
         try:
             if self._timeout:
-                self._timer = threading.Timer(self._timeout, self._timeout_handler)
+                self._timer = threading.Timer(
+                    self._timeout, self._timeout_handler)
                 self._timer.start()
 
             self._connect()
-            
+
             # DESCRIBE
-            resp = self._send_rtsp("DESCRIBE", self.rtsp_url, "Accept: application/sdp")
+            resp = self._send_rtsp(
+                "DESCRIBE", self.rtsp_url, "Accept: application/sdp")
             if "200 OK" not in resp:
                 raise Exception("DESCRIBE failed")
-                
+
             # Parse SDP for metadata track
             sdp_start = resp.find("v=")
             if sdp_start == -1:
                 raise Exception("SDP not found in response")
             sdp = resp[sdp_start:]
-            
+
             # Find metadata track control URL
             track_control = None
             current_media = None
@@ -179,34 +187,36 @@ class SceneMetadataRawClient:
                 elif line.startswith("a=control:") and current_media == "application":
                     track_control = line[len("a=control:"):].strip()
                     break
-                    
+
             if not track_control:
                 raise Exception("Metadata track control URL not found in SDP")
-                
+
             # Resolve track URL
-            track_url = track_control if track_control.startswith("rtsp://") else f"{self.rtsp_url.rstrip('/')}/{track_control}"
-            
+            track_url = track_control if track_control.startswith(
+                "rtsp://") else f"{self.rtsp_url.rstrip('/')}/{track_control}"
+
             # SETUP
-            resp = self._send_rtsp("SETUP", track_url, "Transport: RTP/AVP/TCP;unicast;interleaved=0-1")
+            resp = self._send_rtsp(
+                "SETUP", track_url, "Transport: RTP/AVP/TCP;unicast;interleaved=0-1")
             if "200 OK" not in resp:
                 raise Exception("SETUP failed")
-                
+
             session_match = re.search(r"Session: ([^;\r\n]+)", resp)
             if not session_match:
                 raise Exception("Session ID not found in SETUP response")
             self.session_id = session_match.group(1)
-            
+
             # PLAY
             resp = self._send_rtsp("PLAY", self.rtsp_url)
             if "200 OK" not in resp:
                 raise Exception("PLAY failed")
-            
+
             if self._timer is not None:
                 self._timer.cancel()
 
             # Receive data
             self._receive_data()
-            
+
         except Exception as e:
             logger.error("Error in metadata client: %s", e)
             raise
@@ -232,7 +242,7 @@ class SceneMetadataRawClient:
         logger.info("Starting data stream...")
         self.sock.settimeout(4.0)
         buffer = b""
-        
+
         try:
             while True:
                 try:
@@ -251,13 +261,13 @@ class SceneMetadataRawClient:
                     if buffer[0] == 0x24:  # '$' indicating interleaved RTP/RTCP
                         header = buffer[:4]
                         _, channel, length = struct.unpack("!BBH", header)
-                        
+
                         if len(buffer) < 4 + length:
                             break
-                            
+
                         packet = buffer[4:4+length]
                         buffer = buffer[4+length:]
-                        
+
                         if channel == 0:  # RTP data channel
                             self._handle_metadata_packet(packet)
                     else:
@@ -267,6 +277,6 @@ class SceneMetadataRawClient:
                             buffer = buffer[end_idx+4:]
                         else:
                             break
-                            
+
         except KeyboardInterrupt:
             logger.info("Stream interrupted")

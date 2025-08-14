@@ -41,5 +41,3 @@ def ensure_gi_ready() -> None:
             f"Original error: {exc}"
         )
         raise RuntimeError(guidance) from exc
-
-

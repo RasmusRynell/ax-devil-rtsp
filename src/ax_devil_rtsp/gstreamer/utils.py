@@ -3,6 +3,8 @@ Utility functions for GStreamer RTSP operations.
 """
 
 from __future__ import annotations
+from ..logging import get_logger
+from gi.repository import Gst
 
 import multiprocessing as mp
 from typing import Any, Callable, Dict, Optional
@@ -11,9 +13,7 @@ import gi
 import numpy as np
 
 gi.require_version("Gst", "1.0")
-from gi.repository import Gst
 
-from ..logging import get_logger
 
 logger = get_logger("gstreamer.utils")
 
@@ -65,18 +65,18 @@ def _to_rgb_array(info: Gst.MapInfo, width: int, height: int, fmt: str) -> np.nd
     raise ValueError(f"Unsupported pixel format: {fmt}")
 
 
-
 def run_combined_client_simple_example(
     rtsp_url: str,
     *,
     latency: int = 200,
     queue: Optional[mp.Queue] = None,
-    video_processing_fn: Optional[Callable[[Dict[str, Any], dict], Any]] = None,
+    video_processing_fn: Optional[Callable[[
+        Dict[str, Any], dict], Any]] = None,
     shared_config: Optional[dict] = None,
 ) -> None:
     """Example runner: spawns client and logs or queues payloads."""
     from .client import CombinedRTSPClient
-    
+
     def vid_cb(pl: dict) -> None:
         if queue:
             queue.put({**pl, 'kind': 'video'})
@@ -96,7 +96,8 @@ def run_combined_client_simple_example(
         if queue:
             queue.put({**error, 'kind': 'error'})
         else:
-            logger.error("ERROR %s: %s", error.get('error_type'), error.get('message'))
+            logger.error("ERROR %s: %s", error.get(
+                'error_type'), error.get('message'))
 
     client = CombinedRTSPClient(
         rtsp_url,
@@ -108,4 +109,4 @@ def run_combined_client_simple_example(
         video_processing_fn=video_processing_fn,
         shared_config=shared_config or {},
     )
-    client.start() 
+    client.start()
