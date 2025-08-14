@@ -35,7 +35,8 @@ class _ColorFormatter(_logging.Formatter):
             record.created).strftime("%H:%M:%S.%f")[:-3]
         module_line = f"{record.module}:{record.lineno}"
         message = super().formatMessage(record)
-        return f"{color}{time_str} | {record.levelname:<8} | {module_line:<20} | {message}{_RESET}"
+        
+        return f"{color}{time_str} | {record.levelname:<8} | [{record.process}] {module_line:<20} | {message}{_RESET}"
 
 
 class _JsonFormatter(_logging.Formatter):
@@ -60,6 +61,8 @@ class _JsonFormatter(_logging.Formatter):
             "line": record.lineno,
             "func": record.funcName,
             "message": record.getMessage(),
+            "process_id": record.process,
+            "thread_id": record.thread,
         }
         if record.exc_info:
             payload["traceback"] = self.formatException(record.exc_info)
@@ -79,7 +82,7 @@ class _PlainFormatter(_logging.Formatter):
 
     def __init__(self) -> None:
         super().__init__(
-            fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(module)s:%(lineno)d | %(message)s",
+            fmt="%(asctime)s | %(levelname)-8s | [%(process)d:%(thread)d] | %(name)s | %(module)s:%(lineno)d | %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",  # base - milliseconds injected by formatTime
         )
 

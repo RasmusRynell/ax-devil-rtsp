@@ -263,7 +263,10 @@ class CallbackHandlerMixin:
 
     def _timeout_handler(self) -> None:
         """Handle timeout by stopping client."""
-        logger.warning(f"Timeout reached ({self._timeout}s), stopping client")
+        timeout_thread_id = threading.get_ident()
+        logger.warning(f"Timeout reached ({self._timeout}s), stopping client from timeout handler thread TID={timeout_thread_id}")
+        logger.debug(f"Timeout handler executing: uptime={(time.time() - self.start_time) if hasattr(self, 'start_time') and self.start_time else 'unknown'}s")
         self._report_error(
             "Timeout", f"Connection timed out in {self._timeout}s")
+        logger.debug(f"Timeout handler calling stop() from TID={timeout_thread_id}")
         self.stop()

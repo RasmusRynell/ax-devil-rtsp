@@ -53,9 +53,17 @@ class SceneMetadataRawClient:
     def _connect(self):
         """Establish TCP connection to RTSP server."""
         if self.sock:
+            logger.debug("Closing existing socket connection")
             self.sock.close()
+        
+        logger.debug(f"Attempting TCP connection to {self.ip}:{self.port}")
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((self.ip, self.port))
+        try:
+            self.sock.connect((self.ip, self.port))
+            logger.info(f"Successfully connected to RTSP server {self.ip}:{self.port}")
+        except Exception as e:
+            logger.error(f"Failed to connect to RTSP server {self.ip}:{self.port}: {e}")
+            raise
 
     def _send_request(self, request):
         """Send RTSP request and receive response."""
@@ -226,6 +234,17 @@ class SceneMetadataRawClient:
     def stop(self):
         """Stop the metadata client and clean up resources."""
         logger.info("Stopping SceneMetadataRawClient")
+        
+        # Cancel timeout timer if it exists
+        if self._timer and self._timer.is_alive():
+            logger.debug("Canceling raw socket timeout timer")
+            self._timer.cancel()
+            logger.debug("Raw socket timeout timer canceled")
+        elif self._timer:
+            logger.debug("Raw socket timeout timer exists but is not alive")
+        else:
+            logger.debug("No raw socket timeout timer to cancel")
+            
         if self.sock:
             try:
                 if self.session_id:

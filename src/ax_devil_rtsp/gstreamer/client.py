@@ -78,15 +78,26 @@ class CombinedRTSPClient(CallbackHandlerMixin, DiagnosticMixin, PipelineSetupMix
         logger.info("Starting CombinedRTSPClient")
         self.start_time = time.time()
         logger.debug("Setting pipeline state to PLAYING")
-        if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+        state_change_result = self.pipeline.set_state(Gst.State.PLAYING)
+        logger.debug(f"Pipeline state change result: {state_change_result}")
+        
+        if state_change_result == Gst.StateChangeReturn.FAILURE:
             logger.error("Unable to set pipeline to PLAYING state")
             raise RuntimeError("Unable to set pipeline to PLAYING state")
+        elif state_change_result == Gst.StateChangeReturn.SUCCESS:
+            logger.debug("Pipeline state changed to PLAYING immediately")
+        elif state_change_result == Gst.StateChangeReturn.ASYNC:
+            logger.debug("Pipeline state change to PLAYING is asynchronous")
+        elif state_change_result == Gst.StateChangeReturn.NO_PREROLL:
+            logger.debug("Pipeline state change to PLAYING completed but no preroll")
+        else:
+            logger.debug(f"Unknown pipeline state change result: {state_change_result}")
         try:
             if self._timeout:
+                logger.debug(f"Starting with {self._timeout}s timeout")
                 self._timer = threading.Timer(
                     self._timeout, self._timeout_handler)
                 self._timer.start()
-            logger.debug("Starting main loop")
             self.loop.run()
             logger.debug("Main loop exited")
         except Exception as e:
@@ -98,11 +109,28 @@ class CombinedRTSPClient(CallbackHandlerMixin, DiagnosticMixin, PipelineSetupMix
     def stop(self) -> None:
         """Stop the GStreamer pipeline and quit the loop."""
         logger.info("Stopping CombinedRTSPClient")
+        
+        # Cancel timeout timer if it exists
+        if self._timer and self._timer.is_alive():
+            self._timer.cancel()
+            
         logger.debug("Setting pipeline state to NULL")
-        self.pipeline.set_state(Gst.State.NULL)
+        state_change_result = self.pipeline.set_state(Gst.State.NULL)
+        logger.debug(f"Pipeline state change to NULL result: {state_change_result}")
+        
+        if state_change_result == Gst.StateChangeReturn.FAILURE:
+            logger.warning("Failed to set pipeline state to NULL")
+        elif state_change_result == Gst.StateChangeReturn.SUCCESS:
+            logger.debug("Pipeline state changed to NULL successfully")
+        elif state_change_result == Gst.StateChangeReturn.ASYNC:
+            logger.debug("Pipeline state change to NULL is asynchronous")
+        else:
+            logger.debug(f"Pipeline state change to NULL result: {state_change_result}")
         if self.loop.is_running():
             logger.debug("Quitting main loop")
             self.loop.quit()
+        else:
+            logger.debug("Main loop is not running")
 
     def __enter__(self) -> "CombinedRTSPClient":
         self.start()
