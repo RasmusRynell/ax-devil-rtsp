@@ -146,5 +146,5 @@ def test_dispatch_exits_after_max_empty_polls(monkeypatch):
     dispatch_thread.start()
     dispatch_thread.join(timeout=3)
     assert not dispatch_thread.is_alive(), "Dispatch loop did not exit after max empty polls"
-    # Check that the excessive empty polls message was logged
-    assert any("excessive empty polls" in str(msg) for msg in debug_calls), "Did not log excessive empty polls" 
+    # Check that the consecutive empty polls message was logged
+    assert any("consecutive empty polls" in str(msg) for msg in debug_calls), "Did not log consecutive empty polls" 

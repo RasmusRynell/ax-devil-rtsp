@@ -26,6 +26,7 @@ def test_callback_exception_handling():
     with patch('multiprocessing.Process') as mock_process_class:
         mock_process = Mock()
         mock_process.is_alive.return_value = True
+        mock_process.exitcode = None  # Process is alive, no exit code yet
         mock_process_class.return_value = mock_process
         
         with patch('multiprocessing.Queue') as mock_queue_class:
@@ -50,6 +51,9 @@ def test_callback_exception_handling():
             # The exception should not prevent the loop from continuing
             retriever._queue_dispatch_loop()
             
+            # When stopping, process becomes dead with exit code
+            mock_process.is_alive.return_value = False
+            mock_process.exitcode = 0  # Normal termination
             # Retriever should still be able to stop cleanly
             retriever.stop()
             assert not retriever.is_running
@@ -76,6 +80,7 @@ def test_multiple_callback_exceptions():
     with patch('multiprocessing.Process') as mock_process_class:
         mock_process = Mock()
         mock_process.is_alive.return_value = True
+        mock_process.exitcode = None  # Process is alive, no exit code yet
         mock_process_class.return_value = mock_process
         
         with patch('multiprocessing.Queue') as mock_queue_class:
@@ -99,6 +104,9 @@ def test_multiple_callback_exceptions():
             # Should handle all exceptions and continue
             retriever._queue_dispatch_loop()
             
+            # When stopping, process becomes dead with exit code
+            mock_process.is_alive.return_value = False
+            mock_process.exitcode = 0  # Normal termination
             retriever.stop()
             assert not retriever.is_running
             
@@ -117,6 +125,7 @@ def test_queue_error_handling():
     with patch('multiprocessing.Process') as mock_process_class:
         mock_process = Mock()
         mock_process.is_alive.return_value = True
+        mock_process.exitcode = None  # Process is alive, no exit code yet
         mock_process_class.return_value = mock_process
         
         with patch('multiprocessing.Queue') as mock_queue_class:
@@ -134,5 +143,8 @@ def test_queue_error_handling():
             # Should handle EOFError gracefully and exit loop
             retriever._queue_dispatch_loop()
             
+            # When stopping, process becomes dead with exit code
+            mock_process.is_alive.return_value = False
+            mock_process.exitcode = 0  # Normal termination
             retriever.stop()
             assert not retriever.is_running 

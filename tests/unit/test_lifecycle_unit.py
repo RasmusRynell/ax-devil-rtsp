@@ -26,12 +26,16 @@ def test_multiple_start_stop_cycles():
         with patch('multiprocessing.Process') as mock_process_class:
             mock_process = Mock()
             mock_process.is_alive.return_value = True
+            mock_process.exitcode = None  # Process is alive, no exit code yet
             mock_process_class.return_value = mock_process
             
             with patch('multiprocessing.Queue'):
                 retriever.start()
                 assert retriever.is_running
                 
+                # When stopping, process becomes dead with exit code
+                mock_process.is_alive.return_value = False
+                mock_process.exitcode = 0  # Normal termination
                 retriever.stop()
                 assert not retriever.is_running
 
@@ -65,6 +69,7 @@ def test_start_when_already_started():
     with patch('multiprocessing.Process') as mock_process_class:
         mock_process = Mock()
         mock_process.is_alive.return_value = True
+        mock_process.exitcode = None  # Process is alive, no exit code yet
         mock_process_class.return_value = mock_process
         
         with patch('multiprocessing.Queue'):
@@ -74,6 +79,9 @@ def test_start_when_already_started():
             with pytest.raises(RuntimeError, match="already started"):
                 retriever.start()
             
+            # When stopping, process becomes dead with exit code
+            mock_process.is_alive.return_value = False
+            mock_process.exitcode = 0  # Normal termination
             retriever.stop()
 
 
@@ -95,11 +103,13 @@ def test_is_running_property():
         with patch('multiprocessing.Queue'):
             # When process is alive, should be running
             mock_process.is_alive.return_value = True
+            mock_process.exitcode = None  # Process is alive, no exit code yet
             retriever.start()
             assert retriever.is_running
             
             # When process is dead, should not be running
             mock_process.is_alive.return_value = False
+            mock_process.exitcode = 0  # Process has exited normally
             assert not retriever.is_running
             
             retriever.stop()
@@ -117,11 +127,15 @@ def test_close_method():
     with patch('multiprocessing.Process') as mock_process_class:
         mock_process = Mock()
         mock_process.is_alive.return_value = True
+        mock_process.exitcode = None  # Process is alive, no exit code yet
         mock_process_class.return_value = mock_process
         
         with patch('multiprocessing.Queue'):
             retriever.start()
             assert retriever.is_running
             
+            # When closing, process becomes dead with exit code
+            mock_process.is_alive.return_value = False
+            mock_process.exitcode = 0  # Normal termination
             retriever.close()  # Should work like stop()
             assert not retriever.is_running 
