@@ -11,9 +11,16 @@ failures user-friendly and provide actionable messages.
 def ensure_gi_ready() -> None:
     """Ensure PyGObject (gi) and core GStreamer introspection are available.
 
+    Applies known workarounds for compatibility issues before attempting
+    to import GI/GStreamer components.
+
     Raises a RuntimeError with distro-specific installation guidance when the
     GI stack is unavailable or misconfigured.
     """
+    # Apply workarounds before any gi imports to prevent crashes
+    from .setup_workarounds import ensure_safe_environment
+    ensure_safe_environment()
+    
     try:
         import gi  # type: ignore
 

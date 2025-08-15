@@ -60,7 +60,10 @@ def check_environment():
         'AX_DEVIL_TARGET_USER', 
         'AX_DEVIL_TARGET_PASS',
         'AX_DEVIL_TARGET_ADDR',
-        'PYTHONPATH'
+        'PYTHONPATH',
+        'GIO_MODULE_DIR',  # Important for libproxy workaround
+        'AX_DEVIL_DISABLE_WORKAROUNDS',  # Global workaround control
+        'AX_DEVIL_FORCE_LIBPROXY_WORKAROUND'  # Force libproxy workaround
     ]
     
     print(f"\n=== ENVIRONMENT VARIABLES ===")
@@ -68,12 +71,61 @@ def check_environment():
         value = os.getenv(var, '<not set>')
         print(f"{var}: {value}")
 
+def check_workarounds():
+    """Check status of applied workarounds."""
+    print(f"\n=== WORKAROUND STATUS ===")
+    
+    try:
+        # Import the workaround status checker
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+        from ax_devil_rtsp.setup_workarounds import get_workaround_status
+        
+        status = get_workaround_status()
+        
+        for name, details in status.items():
+            print(f"\n🔧 {name.replace('_', ' ').title()}")
+            
+            if 'error' in details:
+                print(f"  └─ Error: {details['error']}")
+                continue
+                
+            vulnerable = details.get('vulnerable', False)
+            applied = details.get('workaround_applied', False)
+            
+            if not vulnerable:
+                print(f"  └─ ✅ Not vulnerable")
+            elif applied:
+                print(f"  └─ ✅ Vulnerable but workaround applied")
+                validation = details.get('validation_passed')
+                if validation is True:
+                    print(f"     └─ Validation: ✅ Passed")
+                elif validation is False:
+                    print(f"     └─ Validation: ❌ Failed")
+            else:
+                print(f"  └─ ⚠️  Vulnerable - workaround needed")
+                
+            # Show reasons if available
+            reasons = details.get('reasons', [])
+            if reasons and vulnerable:
+                print(f"     Reasons: {', '.join(reasons)}")
+                
+            # Show version info
+            if details.get('gstreamer_version'):
+                print(f"     GStreamer: {details['gstreamer_version']}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"  └─ ❌ Failed to check workarounds: {e}")
+        return False
+
 def main():
     """Main dependency checking routine."""
     print("🔍 ax-devil-rtsp Dependency Checker")
     print("=" * 50)
     
     check_environment()
+    check_workarounds()
     
     print(f"\n=== TESTING IMPORTS ===")
     
