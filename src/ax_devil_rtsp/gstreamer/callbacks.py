@@ -160,9 +160,6 @@ class CallbackHandlerMixin:
         height = struct.get_value('height')
         fmt = struct.get_string('format')
 
-        # TODO: Do this fix in some better way. Also why in the world fmt can be RBG but the image is still bgr...
-        fmt = "BGR"
-
         try:
             frame = _to_rgb_array(info, width, height, fmt)
         except Exception as e:
