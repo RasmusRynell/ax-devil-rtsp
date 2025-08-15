@@ -79,6 +79,19 @@ See also: [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-
 pip install ax-devil-rtsp
 ```
 
+### System Dependencies
+
+On Linux, this library requires system packages for PyGObject and GStreamer. If they're missing, you'll see clear error messages with installation instructions.
+
+**Quick setup (Ubuntu/Debian):**
+```bash
+# Check what's missing
+python tools/dep.py --check
+
+# Get installation commands
+python tools/dep.py --install
+```
+
 ---
 
 ## 🚀 Quick Start
@@ -272,8 +285,9 @@ pip install -e .[dev]
 
 ### Helper Scripts
 
-- `tools/install_dependencies.sh`: Automated system and Python dependency installation (Ubuntu/Debian)
-- `tools/check_dependencies.py`: Verify all dependencies are properly installed
+- `tools/dep.py`: Unified dependency management tool
+  - Check dependencies: `python tools/dep.py --check`
+  - Get install commands (Ubuntu/Debian): `python tools/dep.py --install`
 
 ---
 

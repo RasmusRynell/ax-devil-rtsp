@@ -34,17 +34,11 @@ def ensure_gi_ready() -> None:
     except Exception as exc:  # pragma: no cover - environment dependent
         guidance = (
             "PyGObject/GStreamer not available or incompatible.\n\n"
-            "Install system packages:\n"
-            "- Ubuntu/Debian: sudo apt install python3-gi gobject-introspection "
-            "gir1.2-gstreamer-1.0 gstreamer1.0-plugins-{base,good,bad,ugly} gstreamer1.0-libav\n"
-            "- Fedora/RHEL: sudo dnf install python3-gobject gobject-introspection "
-            "gstreamer1-plugins-{base,good,bad,ugly}-freeworld gstreamer1-libav\n"
-            "- Arch: sudo pacman -S python-gobject gobject-introspection "
-            "gst-plugins-{base,good,bad,ugly} gst-libav\n"
-            "- macOS (Homebrew): brew install gobject-introspection pygobject3 gstreamer "
-            "gst-plugins-base gst-plugins-good\n"
-            "- Windows (MSYS2): pacman -S mingw-w64-ucrt-x86_64-python-gobject "
-            "mingw-w64-ucrt-x86_64-gstreamer\n\n"
+            "🔧 Check dependencies:\n"
+            "   python tools/dep.py --check\n\n"
+            "🛠️ Get install commands (Ubuntu/Debian):\n"
+            "   python tools/dep.py --install\n\n"
+            "For other platforms, see README.md for manual installation.\n\n"
             f"Original error: {exc}"
         )
         raise RuntimeError(guidance) from exc
