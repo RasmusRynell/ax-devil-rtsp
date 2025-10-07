@@ -222,6 +222,9 @@ class RtspDataRetriever(ABC):
     log_level : int, optional
         Logging level used in the subprocess. Defaults to the parent's
         effective logging level.
+    queue_idle_timeout : float, default=10.0
+        Seconds the dispatcher waits without data before considering the
+        subprocess idle and exiting the queue loop.
     """
     QUEUE_POLL_INTERVAL: float = 0.5  # seconds
 
@@ -237,6 +240,7 @@ class RtspDataRetriever(ABC):
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
         log_level: Optional[int] = None,
+        queue_idle_timeout: float = 10.0,
     ):
         # Reset internal state to avoid stale references if start() is called after a crash
         self._proc: Optional[mp.Process] = None
@@ -257,6 +261,7 @@ class RtspDataRetriever(ABC):
         self._on_session_start = on_session_start
         self._log_level = log_level if log_level is not None else logger.getEffectiveLevel()
         self._last_known_alive = False  # Track process state transitions
+        self._queue_idle_timeout = max(queue_idle_timeout, self.QUEUE_POLL_INTERVAL)
         logger.debug(f"RtspDataRetriever initialized: URL={rtsp_url}, callbacks=(video={on_video_data is not None}, app_data={on_application_data is not None}, error={on_error is not None})")
 
     def start(self) -> None:
@@ -371,8 +376,8 @@ class RtspDataRetriever(ABC):
         thread_id = threading.get_ident()
         logger.debug(f"Queue dispatch thread started: TID={thread_id}")
         
-        wait_time_s = 10  # TODO: Move this? make it configurable?
-        MAX_EMPTY_POLLS = wait_time_s/self.QUEUE_POLL_INTERVAL
+        idle_timeout = self._queue_idle_timeout
+        max_empty_polls = max(1, int(round(idle_timeout / self.QUEUE_POLL_INTERVAL)))
         consecutive_empty = 0
         total_messages_processed = 0
         message_counts_by_kind = {}
@@ -407,12 +412,13 @@ class RtspDataRetriever(ABC):
                     break
                 # Otherwise, continue polling.
                 consecutive_empty += 1
-                if consecutive_empty >= MAX_EMPTY_POLLS:
+                if consecutive_empty >= max_empty_polls:
                     logger.debug(
                         f"Queue polling ended due to {consecutive_empty} consecutive empty polls (TID={thread_id}).")
                     break
                 # Log every 20 empty polls to track queue health
-                if consecutive_empty % 20 == 0:
+                log_every = max(1, min(20, max_empty_polls))
+                if consecutive_empty % log_every == 0:
                     logger.debug(f"Queue dispatch TID={thread_id}: {consecutive_empty} consecutive empty polls")
                 continue
             except (EOFError, OSError) as e:
@@ -553,6 +559,7 @@ class RtspVideoDataRetriever(RtspDataRetriever):
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
         log_level: Optional[int] = None,
+        queue_idle_timeout: float = 10.0,
     ):
         super().__init__(
             rtsp_url=rtsp_url,
@@ -565,6 +572,7 @@ class RtspVideoDataRetriever(RtspDataRetriever):
             shared_config=shared_config,
             connection_timeout=connection_timeout,
             log_level=log_level,
+            queue_idle_timeout=queue_idle_timeout,
         )
 
 
@@ -584,6 +592,7 @@ class RtspApplicationDataRetriever(RtspDataRetriever):
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
         log_level: Optional[int] = None,
+        queue_idle_timeout: float = 10.0,
     ):
         super().__init__(
             rtsp_url=rtsp_url,
@@ -596,4 +605,5 @@ class RtspApplicationDataRetriever(RtspDataRetriever):
             shared_config=shared_config,
             connection_timeout=connection_timeout,
             log_level=log_level,
+            queue_idle_timeout=queue_idle_timeout,
         )

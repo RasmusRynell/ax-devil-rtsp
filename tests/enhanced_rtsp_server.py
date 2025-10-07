@@ -11,9 +11,11 @@ to be correctly detected by CombinedRTSPClient.
 
 import pytest
 import gi
+import socket
 import threading
 import time
 import xml.sax.saxutils
+from contextlib import closing
 from typing import Optional
 from ax_devil_rtsp.logging import get_logger
 
@@ -256,18 +258,55 @@ def rtsp_server():
         raise RuntimeError(f"RTSP server failed to start: {exc}") from exc
 
 
+def _pick_available_port(preferred: int = 8555) -> int:
+    """Return an available TCP port, preferring the supplied value."""
+
+    def port_free(candidate: int) -> bool:
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("127.0.0.1", candidate))
+            except OSError:
+                return False
+        return True
+
+    candidate_ports = [preferred] + list(range(preferred + 1, preferred + 6))
+    for candidate in candidate_ports:
+        if port_free(candidate):
+            return candidate
+
+    # Fallback: ask OS for an ephemeral port and return it
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
 @pytest.fixture(scope="session")
 def dual_stream_rtsp_server():
     """Provide enhanced RTSP server with both video and application data streams."""
-    try:
-        # TODO: Add check for others running on this port, then change port.
-        server = DualStreamAxisRTSPServer(port=8555)
-        url = server.start()
-        yield url
-        server.stop()
-    except Exception as exc:
-        # Don't skip - let the test fail! This indicates a real problem
-        raise RuntimeError(f"Dual-stream RTSP server failed to start: {exc}") from exc
+
+    last_error: Optional[Exception] = None
+    for _ in range(8):
+        port = _pick_available_port()
+        server = DualStreamAxisRTSPServer(port=port)
+        try:
+            url = server.start()
+        except Exception as exc:  # pragma: no cover - defensive path
+            last_error = exc
+            try:
+                server.stop()
+            except Exception:
+                logger.exception("Error stopping failed RTSP server")
+            continue
+
+        try:
+            yield url
+            return
+        finally:
+            server.stop()
+
+    # Don't skip - let the test fail! This indicates a real problem
+    raise RuntimeError("Dual-stream RTSP server failed to start") from last_error
 
 
 if __name__ == "__main__":
