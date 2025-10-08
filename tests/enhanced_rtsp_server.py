@@ -19,7 +19,7 @@ from contextlib import closing
 from typing import Optional
 from ax_devil_rtsp.logging import get_logger
 
-logger = get_logger("enhanced_rtsp_server")
+logger = get_logger(__name__)
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GstRtspServer", "1.0") 

@@ -10,7 +10,7 @@ from typing import Optional
 
 from ..logging import get_logger
 
-logger = get_logger("gstreamer.pipeline")
+logger = get_logger(__name__)
 
 
 gi.require_version("Gst", "1.0")

@@ -5,7 +5,7 @@ import urllib.parse
 
 from .logging import get_logger
 
-logger = get_logger("utils")
+logger = get_logger(__name__)
 
 
 def parse_axis_scene_metadata_xml(xml_data: bytes) -> dict:
