@@ -104,7 +104,7 @@ def _display_loop(video_frames, args, retriever, logger):
 def main(**kwargs):
     args = SimpleNamespace(**kwargs)
     init_app_logging(debug=args.log_level.upper() == "DEBUG")
-    logger = get_logger("cli")
+    logger = get_logger(__name__)
     logger.info(f"Starting with args: {args}")
 
     if getattr(args, "rtsp_url", None):

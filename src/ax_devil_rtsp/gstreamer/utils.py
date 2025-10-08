@@ -15,7 +15,7 @@ import numpy as np
 gi.require_version("Gst", "1.0")
 
 
-logger = get_logger("gstreamer.utils")
+logger = get_logger(__name__)
 
 
 def _map_buffer(buf: Gst.Buffer) -> tuple[bool, Gst.MapInfo]:

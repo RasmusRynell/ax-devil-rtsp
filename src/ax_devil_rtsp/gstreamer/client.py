@@ -20,7 +20,7 @@ gi.require_version("Gst", "1.0")
 gi.require_version("GLib", "2.0")
 
 
-logger = get_logger("gstreamer.client")
+logger = get_logger(__name__)
 
 
 class CombinedRTSPClient(CallbackHandlerMixin, DiagnosticMixin, PipelineSetupMixin):

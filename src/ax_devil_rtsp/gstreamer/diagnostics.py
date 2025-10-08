@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 from ..logging import get_logger
 
-logger = get_logger("gstreamer.diagnostics")
+logger = get_logger(__name__)
 
 
 class DiagnosticMixin:
