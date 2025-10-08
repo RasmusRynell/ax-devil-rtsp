@@ -81,7 +81,8 @@ def _display_loop(video_frames, args, retriever, logger):
         try:
             frame = video_frames.get(timeout=0.1)
             if frame is not None:
-                cv2.imshow("RTSP Stream", frame)
+                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                cv2.imshow("RTSP Stream", frame_bgr)
 
             # Check for 'q' key to quit
             if cv2.waitKey(1) & 0xFF == ord('q'):

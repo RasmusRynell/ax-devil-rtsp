@@ -260,7 +260,7 @@ def generate_install_commands() -> List[str]:
     commands.append(f"sudo apt-get install -y {packages_str}")
     
     # Python dependencies
-    commands.append("python -m pip install -e .[dev]")
+    commands.append("python -m pip install -e \".[dev]\"")
     
     return commands
 
