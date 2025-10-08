@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional
 
 from ..logging import get_logger
 
-logger = get_logger("gstreamer.callbacks")
+logger = get_logger(__name__)
 
 
 gi.require_version("Gst", "1.0")
