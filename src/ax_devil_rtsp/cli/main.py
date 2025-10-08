@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import queue
 import sys
 import time
@@ -103,7 +104,8 @@ def _display_loop(video_frames, args, retriever, logger):
 
 def main(**kwargs):
     args = SimpleNamespace(**kwargs)
-    init_app_logging(debug=args.log_level.upper() == "DEBUG")
+    log_level = getattr(logging, args.log_level.upper(), logging.INFO)
+    init_app_logging(log_level=log_level)
     logger = get_logger("cli")
     logger.info(f"Starting with args: {args}")
 

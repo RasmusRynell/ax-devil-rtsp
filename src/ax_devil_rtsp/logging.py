@@ -110,7 +110,7 @@ def _get_default_logs_dir() -> Path:
 
 def setup_logging(
     *,
-    log_level: str | int = "INFO",
+    log_level: int = _logging.INFO,
     json_log_file: Optional[Path] = None,
     plain_log_file: Optional[Path] = None,
     max_file_size: int = 25 * 1024 * 1024,  # 25 MB
@@ -120,10 +120,16 @@ def setup_logging(
 ) -> _logging.Logger:
     """Initialise root + ax-devil-rtsp loggers with JSON *and* plain-text files."""
 
+    if not isinstance(log_level, int):
+        raise TypeError(
+            "log_level must be an int matching logging levels; got "
+            f"{log_level!r} ({type(log_level).__name__})"
+        )
+
     if debug:
-        log_level = "DEBUG"
-    numeric_level = _logging._nameToLevel.get(
-        str(log_level).upper(), _logging.INFO)
+        numeric_level = _logging.DEBUG
+    else:
+        numeric_level = log_level
 
     if logs_dir is None:
         logs_path = _get_default_logs_dir()
@@ -196,6 +202,6 @@ def get_logger(name: str) -> _logging.Logger:  # noqa: D401
 # ─ Convenience façade ──────────────────────────────────────────────────────────
 
 
-def init_app_logging(*, debug: bool = False) -> _logging.Logger:  # noqa: D401
+def init_app_logging(*, log_level: int = _logging.INFO, debug: bool = False) -> _logging.Logger:  # noqa: D401
     """Initialise logging and return the main logger."""
-    return setup_logging(debug=debug)
+    return setup_logging(log_level=log_level, debug=debug)

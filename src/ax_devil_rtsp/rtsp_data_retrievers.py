@@ -55,7 +55,7 @@ else:
     SessionStartCallback = Callable[[RtspPayload], None]
 
 
-logger = get_logger("rtsp_data_retrievers")
+logger = get_logger(__name__)
 
 __all__ = [
     "RtspPayload",

@@ -130,7 +130,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..logging import get_logger
 
-logger = get_logger("setup_workarounds.libproxy_segfault")
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
