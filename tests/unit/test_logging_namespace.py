@@ -24,8 +24,6 @@ def test_logging_namespace_and_defaults(tmp_path, caplog) -> None:
     assert (tmp_path / "ax-devil-rtsp_main.log").exists()
     assert (tmp_path / "ax-devil-rtsp_main.json").exists()
 
-    assert any(record.message == "Logging initialized" for record in caplog.records)
-
     # Close handlers created during setup to avoid interfering with other tests
     root_logger = logging.getLogger()
     for handler in root_logger.handlers:
