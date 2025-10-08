@@ -118,7 +118,7 @@ def setup_logging(
     logs_dir: Path | str | None = None,
     debug: bool = False,
 ) -> _logging.Logger:
-    """Initialise root + ax-devil loggers with JSON *and* plain-text files."""
+    """Initialise root + ax-devil-rtsp loggers with JSON *and* plain-text files."""
 
     if debug:
         log_level = "DEBUG"
@@ -132,9 +132,9 @@ def setup_logging(
     logs_path.mkdir(parents=True, exist_ok=True)
 
     if json_log_file is None:
-        json_log_file = logs_path / "ax_devil_main.json"
+        json_log_file = logs_path / "ax-devil-rtsp_main.json"
     if plain_log_file is None:
-        plain_log_file = logs_path / "ax_devil_main.log"
+        plain_log_file = logs_path / "ax-devil-rtsp_main.log"
 
     root = _logging.getLogger()
     root.handlers.clear()
@@ -188,8 +188,9 @@ def setup_logging(
 
 
 def get_logger(name: str) -> _logging.Logger:  # noqa: D401
-    """Return a child logger in the ax-devil namespace."""
-    return _logging.getLogger(f"ax_devil.{name}")
+    """Return a logger within the ax-devil-rtsp namespace."""
+    suffix = f".{name}" if name else ""
+    return _logging.getLogger(f"ax-devil-rtsp{suffix}")
 
 
 # ─ Convenience façade ──────────────────────────────────────────────────────────
