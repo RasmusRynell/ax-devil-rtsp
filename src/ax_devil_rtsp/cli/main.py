@@ -151,7 +151,15 @@ def main(**kwargs):
         logger.info(xml)
 
     def on_session_start(payload):
-        logger.info(f"[SESSION METADATA] {payload}")
+        caps_media = payload.get("caps_parsed", {}).get("media")
+        structure_media = payload.get("structure_parsed", {}).get("media")
+        media = caps_media or structure_media
+        logger.info(
+            "[SESSION METADATA] %s pad=%s caps=%s",
+            media,
+            payload.get("stream_name"),
+            payload.get("caps"),
+        )
 
     def on_error(payload):
         error_type = payload.get("error_type", "Unknown")

@@ -114,6 +114,13 @@ def on_application_data(payload):
     diagnostics = payload["diagnostics"]
     print(f"Application data: {len(xml_data)} bytes, {diagnostics}")
 
+def on_session_start(payload):
+    # Called once per RTP pad (e.g. video + application metadata).
+    caps_media = payload.get("caps_parsed", {}).get("media")
+    structure_media = payload.get("structure_parsed", {}).get("media")
+    media = caps_media or structure_media
+    print(f"Session start for media={media!r}: {payload['stream_name']}")
+
 def on_error(payload):
     print(f"Error: {payload['message']}")
 
@@ -135,6 +142,7 @@ def main():
         rtsp_url=rtsp_url,
         on_video_data=on_video_data,
         on_application_data=on_application_data,
+        on_session_start=on_session_start,
         on_error=on_error,
         latency=100,
     )
@@ -144,6 +152,10 @@ def main():
         print("Streaming... Press Ctrl+C to stop")
         while True:
             time.sleep(0.1)
+
+# Expect `on_session_start` to run once for each RTP pad (typically
+# one for video and one for application metadata). Use the parsed
+# `media` field to tell them apart, as shown above.
 
 if __name__ == "__main__":
     freeze_support()  # Needed on Windows when multiprocessing start method is 'spawn'
