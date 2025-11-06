@@ -210,7 +210,11 @@ class RtspDataRetriever(ABC):
     on_error : ErrorCallback, optional
         Callback for errors. Receives a payload dict.
     on_session_start : SessionStartCallback, optional
-        Callback for session metadata. Receives a payload dict.
+        Callback for session metadata. Receives a payload dict that fires once per
+        RTP pad (for example, video and application metadata). Inspect
+        ``payload["caps_parsed"]["media"]`` or, as a fallback,
+        ``payload["structure_parsed"]["media"]`` inside the callback to
+        distinguish pad types.
     latency : int, default=200
         GStreamer pipeline latency in ms.
     video_processing_fn : Callable, optional
