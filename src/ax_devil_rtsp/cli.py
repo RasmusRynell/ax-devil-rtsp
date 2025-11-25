@@ -331,18 +331,18 @@ def _shared_options(func):
     return func
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
-def cli() -> None:
-    """Retrieve RTSP video and application data from Axis devices."""
-    pass
-
-
-@cli.command("device")
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option(
+    "--url",
+    "rtsp_url",
+    type=str,
+    help="Connect using an existing RTSP URL (skips device URL construction).",
+)
 @click.option(
     "--device-ip",
     "-a",
     envvar="AX_DEVIL_TARGET_ADDR",
-    required=True,
+    required=False,
     show_envvar=True,
     help="Device IP address or hostname",
 )
@@ -386,19 +386,19 @@ def cli() -> None:
     ),
 )
 @_shared_options
-def device(**kwargs) -> None:
-    """Build the RTSP URL from device info and connect."""
-    main(**kwargs)
+def cli(rtsp_url: str | None, device_ip: str | None, **kwargs) -> None:
+    """Retrieve RTSP video and application data from Axis devices."""
+    if rtsp_url:
+        main(rtsp_url=rtsp_url, **kwargs)
+        return
 
+    if not device_ip:
+        raise click.UsageError(
+            "Provide --url or --device-ip/AX_DEVIL_TARGET_ADDR to build the RTSP URL.",
+            ctx=click.get_current_context(),
+        )
 
-@cli.command("url")
-@click.argument("rtsp_url")
-@_shared_options
-def url(rtsp_url: str, **kwargs) -> None:
-    """Connect using an existing RTSP URL.
-
-    Options that build the URL (e.g. ``--resolution``) are not available."""
-    main(rtsp_url=rtsp_url, **kwargs)
+    main(device_ip=device_ip, **kwargs)
 
 
 if __name__ == "__main__":

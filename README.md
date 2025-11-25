@@ -46,26 +46,27 @@ Run `ax-devil-rtsp --help` for the full reference. Common flows:
 
 - Connect to a device (builds the RTSP URL for you):
   ```bash
-  ax-devil-rtsp device --device-ip 192.168.1.90 --device-username admin --device-password secret
+  ax-devil-rtsp --device-ip 192.168.1.90 --device-username admin --device-password secret
   ```
 - Use an existing RTSP URL:
   ```bash
-  ax-devil-rtsp url "rtsp://admin:secret@192.168.1.90/axis-media/media.amp?analytics=polygon"
+  ax-devil-rtsp --url "rtsp://admin:secret@192.168.1.90/axis-media/media.amp?analytics=polygon"
   ```
 - Switch modes without changing the URL:
   ```bash
   # Video only
-  ax-devil-rtsp device ... --only-video
+  ax-devil-rtsp ... --only-video
 
   # Application data only
-  ax-devil-rtsp device ... --only-application-data
+  ax-devil-rtsp ... --only-application-data
 
   # Disable RTP extension data
-  ax-devil-rtsp device ... --no-rtp-ext
+  ax-devil-rtsp ... --no-rtp-ext
   ```
 - Adjust the stream: `--resolution 1280x720`, `--source 2`, `--latency 200`
+  (only applies when building the URL without `--url`)
 - Demo helpers: `--enable-video-processing`, `--brightness-adjustment 25`, `--manual-lifecycle`
-  (options like `--resolution` apply when building the URL via `device`)
+  (`--url` skips device-specific URL construction)
 
 ---
 
