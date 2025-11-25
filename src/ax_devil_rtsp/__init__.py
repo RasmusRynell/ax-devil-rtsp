@@ -15,7 +15,7 @@ from .rtsp_data_retrievers import (
 from .utils import build_axis_rtsp_url
 from .utils.deps import ensure_gi_ready
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 __all__ = [
     "RtspPayload",
