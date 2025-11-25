@@ -18,7 +18,7 @@ def ensure_gi_ready() -> None:
     GI stack is unavailable or misconfigured.
     """
     # Apply workarounds before any gi imports to prevent crashes
-    from .setup_workarounds import ensure_safe_environment
+    from ..setup_workarounds import ensure_safe_environment
     ensure_safe_environment()
     
     try:

@@ -3,7 +3,7 @@ Main GStreamer RTSP client implementation.
 """
 
 from __future__ import annotations
-from ..logging import get_logger
+from ..utils.logging import get_logger
 from .pipeline import PipelineSetupMixin
 from .diagnostics import DiagnosticMixin
 from .callbacks import CallbackHandlerMixin

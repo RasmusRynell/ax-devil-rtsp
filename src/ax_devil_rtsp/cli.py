@@ -9,7 +9,7 @@ import click
 import cv2
 import numpy as np
 
-from .logging import init_app_logging, get_logger
+from .utils.logging import init_app_logging, get_logger
 from .rtsp_data_retrievers import (
     RtspApplicationDataRetriever,
     RtspDataRetriever,
@@ -63,10 +63,10 @@ def simple_video_processing_example(
     return processed
 
 
-def _display_loop(video_frames, args, retriever, logger):
+def _display_loop(video_frames, args, retriever):
     """Display loop for showing video frames."""
     if args.only_application_data:
-        logger.info("Application data only mode - no video display")
+        print("Application data only mode - no video display")
         try:
             while retriever.is_running:
                 time.sleep(1)
@@ -74,7 +74,7 @@ def _display_loop(video_frames, args, retriever, logger):
             return
         return
 
-    logger.info("Starting video display...")
+    print("Starting video display...")
 
     while retriever.is_running:
         try:
@@ -85,16 +85,16 @@ def _display_loop(video_frames, args, retriever, logger):
 
             # Check for 'q' key to quit
             if cv2.waitKey(1) & 0xFF == ord('q'):
-                logger.info("User pressed 'q' to quit")
+                print("User pressed 'q' to quit")
                 break
 
         except queue.Empty:
             continue
         except KeyboardInterrupt:
-            logger.info("Keyboard interrupt received")
+            print("Keyboard interrupt received")
             break
         except Exception as e:
-            logger.error(f"Error in display loop: {e}")
+            print(f"Error in display loop: {e}", file=sys.stderr)
             break
 
     cv2.destroyAllWindows()
@@ -127,7 +127,7 @@ def main(**kwargs):
         except ValueError as e:
             logger.error(e)
             sys.exit(1)
-    logger.info(f"Starting stream on {rtsp_url=}")
+    print(f"Starting stream on rtsp_url={rtsp_url}")
 
     # Callback functions for handling different data types
     # Queue for transferring frames to the main thread
@@ -149,17 +149,15 @@ def main(**kwargs):
         xml = payload["data"]
         diag = payload["diagnostics"]
         logger.info(f"[APPLICATION DATA] {len(xml)} bytes, diag={diag}")
-        logger.info(xml)
+        print(xml)
 
     def on_session_start(payload):
         caps_media = payload.get("caps_parsed", {}).get("media")
         structure_media = payload.get("structure_parsed", {}).get("media")
         media = caps_media or structure_media
         logger.info(
-            "[SESSION METADATA] %s pad=%s caps=%s",
-            media,
-            payload.get("stream_name"),
-            payload.get("caps"),
+            f"[SESSION METADATA] {media} pad={payload.get('stream_name')} "
+            f"caps={payload.get('caps')}"
         )
 
     def on_error(payload):
@@ -216,24 +214,22 @@ def main(**kwargs):
     retriever = retriever_class(**kwargs)
 
     try:
-        logger.info(
+        print(
             f"[DEMO] Using {'manual lifecycle' if args.manual_lifecycle else 'context manager'}")
 
         if args.manual_lifecycle:
             retriever.start()
-            logger.info("RTSP Data Retriever started manually")
             try:
-                logger.info(
+                print(
                     "Press Ctrl+C to stop, or 'q' in video window to quit")
-                _display_loop(video_frames, args, retriever, logger)
+                _display_loop(video_frames, args, retriever)
             finally:
                 retriever.stop()
         else:
             with retriever:
-                logger.info("RTSP Data Retriever started")
-                logger.info(
+                print(
                     "Press Ctrl+C to stop, or 'q' in video window to quit")
-                _display_loop(video_frames, args, retriever, logger)
+                _display_loop(video_frames, args, retriever)
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     except Exception as e:

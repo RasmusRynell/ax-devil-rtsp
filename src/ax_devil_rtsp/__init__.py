@@ -13,7 +13,7 @@ from .rtsp_data_retrievers import (
     RtspApplicationDataRetriever,
 )
 from .utils import build_axis_rtsp_url
-from .deps import ensure_gi_ready
+from .utils.deps import ensure_gi_ready
 
 __version__ = "0.2.0"
 

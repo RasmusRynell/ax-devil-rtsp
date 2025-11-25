@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from ax_devil_rtsp.logging import get_logger, setup_logging
+from ax_devil_rtsp.utils.logging import get_logger, setup_logging
 
 
 def test_logging_namespace_and_defaults(tmp_path, caplog) -> None:

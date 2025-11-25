@@ -17,7 +17,7 @@ Note:
     Always call stop() or use the context manager to ensure resources are cleaned up.
 """
 
-from .logging import create_queue_listener, get_logger
+from .utils.logging import create_queue_listener, get_logger
 import multiprocessing as mp
 import threading
 import queue as queue_mod
@@ -28,7 +28,7 @@ import traceback
 import logging
 import logging.handlers as log_handlers
 
-from .deps import ensure_gi_ready
+from .utils.deps import ensure_gi_ready
 
 # IMPORTANT: Always use 'spawn' start method for multiprocessing to ensure
 # compatibility between parent and GStreamer subprocesses, and to avoid
@@ -90,7 +90,7 @@ def _client_process(
     """
     import sys
     import time
-    from .logging import setup_logging
+    from .utils.logging import setup_logging
     if log_queue is not None:
         setup_logging(
             log_level=log_level,
@@ -302,7 +302,7 @@ class RtspDataRetriever(ABC):
         base_logger = get_logger("")
         if not base_logger.handlers:
             # Minimal console logging if the host app has not configured handlers.
-            from .logging import setup_logging
+            from .utils.logging import setup_logging
             setup_logging(log_level=self._log_level, log_to_file=False)
         log_queue_for_child: mp.Queue | None = None
         if base_logger.handlers:

@@ -17,7 +17,7 @@ import time
 import xml.sax.saxutils
 from contextlib import closing
 from typing import Optional
-from ax_devil_rtsp.logging import get_logger
+from ax_devil_rtsp.utils.logging import get_logger
 
 logger = get_logger(__name__)
 

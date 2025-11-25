@@ -6,7 +6,7 @@ import types
 import pytest
 
 from ax_devil_rtsp.utils import build_axis_rtsp_url
-from ax_devil_rtsp.logging import setup_logging
+from ax_devil_rtsp.utils.logging import setup_logging
 
 # Ensure src directory is importable without installation
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))

@@ -3,7 +3,7 @@ Utility functions for GStreamer RTSP operations.
 """
 
 from __future__ import annotations
-from ..logging import get_logger
+from ..utils.logging import get_logger
 from gi.repository import Gst
 
 import multiprocessing as mp

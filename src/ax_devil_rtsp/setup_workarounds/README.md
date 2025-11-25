@@ -41,7 +41,7 @@ The workarounds in this module are designed to be:
 Workarounds are automatically applied through the standard dependency system:
 
 ```python
-from ax_devil_rtsp.deps import ensure_gi_ready
+from ax_devil_rtsp.utils.deps import ensure_gi_ready
 ensure_gi_ready()  # Applies workarounds, then imports and validates GI/GStreamer
 ```
 
@@ -112,14 +112,14 @@ print(status)
 
 1. Create a new module in this directory (e.g., `new_issue.py`)
 2. Implement detection and workaround classes following the `libproxy_segfault.py` pattern
-3. Add the workaround call to `deps.py`'s `ensure_gi_ready()` function
+3. Add the workaround call to `utils/deps.py`'s `ensure_gi_ready()` function
 4. Export the workaround function from `setup_workarounds/__init__.py`
 5. Update `tools/check_dependencies.py` to report the new workaround
 6. Document the issue and solution in this README
 
 ## Design Principles
 
-- **Single Entry Point**: All workarounds applied through `deps.py` to prevent confusion
+- **Single Entry Point**: All workarounds applied through `utils/deps.py` to prevent confusion
 - **Fail-safe**: Workarounds should never cause more problems than they solve
 - **Detectable**: All workarounds should be easily detectable and reportable
 - **Reversible**: Environment changes should be minimal and non-permanent

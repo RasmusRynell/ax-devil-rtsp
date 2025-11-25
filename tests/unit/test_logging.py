@@ -4,7 +4,7 @@ import multiprocessing as mp
 
 import pytest
 
-from ax_devil_rtsp.logging import setup_logging
+from ax_devil_rtsp.utils.logging import setup_logging
 
 
 def _cleanup(logger: logging.Logger) -> None:

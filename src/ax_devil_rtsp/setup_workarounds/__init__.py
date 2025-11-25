@@ -3,7 +3,7 @@ Setup workarounds for known issues in GStreamer/Linux environments.
 
 This module provides utilities to detect and apply workarounds for compatibility 
 issues. Workarounds are applied through the standard dependency checking system
-in deps.py, ensuring they happen before any problematic imports.
+in utils/deps.py, ensuring they happen before any problematic imports.
 
 The workarounds are applied conservatively - they only activate when:
 1. The specific vulnerability is detected
@@ -12,7 +12,7 @@ The workarounds are applied conservatively - they only activate when:
 
 Usage:
     # Recommended: Use through standard dependency system
-    from ax_devil_rtsp.deps import ensure_gi_ready
+    from ax_devil_rtsp.utils.deps import ensure_gi_ready
     ensure_gi_ready()  # Automatically applies workarounds before GI import
     
     # Manual control (for testing/diagnostics)
@@ -27,7 +27,7 @@ Usage:
 from __future__ import annotations
 
 from .libproxy_segfault import ensure_safe_environment
-from ..logging import get_logger
+from ..utils.logging import get_logger
 
 logger = get_logger("setup_workarounds")
 
