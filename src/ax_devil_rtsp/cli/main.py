@@ -114,9 +114,9 @@ def main(**kwargs):
     else:
         try:
             rtsp_url = build_axis_rtsp_url(
-                ip=args.ip,
-                username=args.username,
-                password=args.password,
+                ip=args.device_ip,
+                username=args.device_username,
+                password=args.device_password,
                 video_source=getattr(args, "source", 1),
                 get_video_data=not args.only_application_data,
                 get_application_data=not args.only_video,
@@ -330,24 +330,30 @@ def cli() -> None:
 
 @cli.command("device")
 @click.option(
-    "--ip",
+    "--device-ip",
+    "-a",
     envvar="AX_DEVIL_TARGET_ADDR",
     required=True,
-    help="Camera IP address (env: AX_DEVIL_TARGET_ADDR)",
+    show_envvar=True,
+    help="Device IP address or hostname",
 )
 @click.option(
-    "--username",
+    "--device-username",
+    "-u",
     envvar="AX_DEVIL_TARGET_USER",
     default="",
     show_default=True,
-    help="Device username (env: AX_DEVIL_TARGET_USER)",
+    show_envvar=True,
+    help="Device username",
 )
 @click.option(
-    "--password",
+    "--device-password",
+    "-p",
     envvar="AX_DEVIL_TARGET_PASS",
     default="",
     show_default=True,
-    help="Device password (env: AX_DEVIL_TARGET_PASS)",
+    show_envvar=True,
+    help="Device password",
 )
 @click.option(
     "--source",

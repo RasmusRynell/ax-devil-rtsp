@@ -221,7 +221,8 @@ The CLI offers two subcommands:
 
 **Basic Usage (streams both video and application data):**
 ```bash
-ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret
+ax-devil-rtsp device --device-ip 192.168.1.90 --device-username admin --device-password secret
+# or shorthand: ax-devil-rtsp device -a 192.168.1.90 -u admin -p secret
 ```
 
 **Using a complete RTSP URL:**
@@ -232,23 +233,23 @@ ax-devil-rtsp url "rtsp://admin:secret@192.168.1.90/axis-media/media.amp?analyti
 **Common Options:**
 ```bash
 # Custom resolution
-ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret \
+ax-devil-rtsp device --device-ip 192.168.1.90 --device-username admin --device-password secret \
   --resolution 1280x720
 
 # Different camera source
-ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret --source 2
+ax-devil-rtsp device --device-ip 192.168.1.90 --device-username admin --device-password secret --source 2
 ```
 
 **Specialized Modes:**
 ```bash
 # Video only (no application data overlay)
-ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret --only-video
+ax-devil-rtsp device --device-ip 192.168.1.90 --device-username admin --device-password secret --only-video
 
 # Application data only (no video window)
-ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret --only-application-data
+ax-devil-rtsp device --device-ip 192.168.1.90 --device-username admin --device-password secret --only-application-data
 
 # Disable RTP extension data
-ax-devil-rtsp device --ip 192.168.1.90 --username admin --password secret --no-rtp-ext
+ax-devil-rtsp device --device-ip 192.168.1.90 --device-username admin --device-password secret --no-rtp-ext
 ```
 
 For demo processing and lifecycle control, see: `--enable-video-processing`, `--brightness-adjustment`, and `--manual-lifecycle` (run `ax-devil-rtsp device --help`).
@@ -261,7 +262,7 @@ export AX_DEVIL_TARGET_USER=admin
 export AX_DEVIL_TARGET_PASS=secret
 export AX_DEVIL_USAGE_CLI=safe  # Set to "unsafe" to skip SSL verification
 ```
-Set these variables to avoid passing `--ip`, `--username`, or `--password` each
+Set these variables to avoid passing `--device-ip`, `--device-username`, or `--device-password` each
 time you invoke the `device` command.
 `AX_DEVIL_USAGE_CLI` is shared with related `ax-devil-*` tools and kept here for consistency.
 
