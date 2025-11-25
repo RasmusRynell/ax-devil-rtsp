@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 RTSP Data Retriever Classes
 
@@ -15,7 +17,7 @@ Note:
     Always call stop() or use the context manager to ensure resources are cleaned up.
 """
 
-from .logging import get_logger
+from .logging import create_queue_listener, get_logger
 import multiprocessing as mp
 import threading
 import queue as queue_mod
@@ -24,6 +26,7 @@ from abc import ABC
 import os
 import traceback
 import logging
+import logging.handlers as log_handlers
 
 from .deps import ensure_gi_ready
 
@@ -79,6 +82,7 @@ def _client_process(
     log_level: int,
     enable_video: bool,
     enable_application: bool,
+    log_queue: mp.Queue | None,
 ):
     """
     Subprocess target: Instantiates CombinedRTSPClient and pushes events to the queue.
@@ -87,7 +91,16 @@ def _client_process(
     import sys
     import time
     from .logging import setup_logging
-    setup_logging(log_level=log_level)
+    if log_queue is not None:
+        setup_logging(
+            log_level=log_level,
+            console=False,
+            log_to_file=False,
+            queue_only=True,
+            log_queue=log_queue,
+        )
+    else:
+        setup_logging(log_level=log_level, console=True, log_to_file=False)
     
     current_pid = os.getpid()
     parent_pid = os.getppid()
@@ -252,6 +265,8 @@ class RtspDataRetriever(ABC):
         # This is robust and avoids the pitfalls of Manager().Queue() for high-throughput or large data.
         self._queue: mp.Queue = mp.Queue()
         logger.debug(f"Created multiprocessing queue for RTSP retriever: {rtsp_url}")
+        self._log_queue: mp.Queue | None = None
+        self._log_listener: log_handlers.QueueListener | None = None
         self._queue_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._rtsp_url = rtsp_url
@@ -283,7 +298,28 @@ class RtspDataRetriever(ABC):
         main_pid = os.getpid()
         logger.info("Starting retriever process...")
         logger.debug(f"Main process PID={main_pid}, spawning subprocess for URL: {self._rtsp_url}")
-        
+
+        base_logger = get_logger("")
+        if not base_logger.handlers:
+            # Minimal console logging if the host app has not configured handlers.
+            from .logging import setup_logging
+            setup_logging(log_level=self._log_level, log_to_file=False)
+        log_queue_for_child: mp.Queue | None = None
+        if base_logger.handlers:
+            candidate_queue = mp.Queue()
+            if isinstance(candidate_queue, mp.queues.Queue):
+                self._log_queue = candidate_queue
+                self._log_listener = create_queue_listener(
+                    self._log_queue,
+                    handlers=[
+                        h for h in base_logger.handlers if not isinstance(h, log_handlers.QueueHandler)
+                    ],
+                )
+                if self._log_listener:
+                    self._log_listener.start()
+                    log_queue_for_child = self._log_queue
+                    logger.debug("Started log queue listener for retriever subprocess")
+
         self._proc = mp.Process(
             target=_client_process,
             args=(
@@ -296,6 +332,7 @@ class RtspDataRetriever(ABC):
                 self._log_level,
                 self._on_video_data is not None or self._video_processing_fn is not None,
                 self._on_application_data is not None,
+                log_queue_for_child,
             ),
         )
         self._proc.start()
@@ -359,7 +396,17 @@ class RtspDataRetriever(ABC):
                     logger.warning(f"Queue thread TID={queue_thread_id} did not stop within timeout")
                 else:
                     logger.debug(f"Queue thread TID={queue_thread_id} stopped successfully")
-            
+            if self._log_listener is not None:
+                logger.debug("Stopping log queue listener")
+                self._log_listener.stop()
+                self._log_listener = None
+            if self._log_queue is not None:
+                logger.debug("Closing log queue")
+                # Close only if this is a real multiprocessing queue
+                if isinstance(self._log_queue, mp.queues.Queue):
+                    self._log_queue.close()
+                self._log_queue = None
+
             logger.debug("Cleaning up process and thread references")
             self._proc = None
             self._queue_thread = None

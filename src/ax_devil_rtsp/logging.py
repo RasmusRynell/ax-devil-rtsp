@@ -1,80 +1,14 @@
 from __future__ import annotations
 
 import datetime as _dt
-import json as _json
 import logging as _logging
 import logging.handlers as _handlers
-import platform as _platform
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping, Optional
-
-# ────────────────────────────────────────────────────────────────────────────────
-# Colour codes for console output (simplified ANSI)
-# ────────────────────────────────────────────────────────────────────────────────
-
-_RESET = "\033[0m"
-_COLORS: Mapping[str, str] = {
-    "DEBUG": "\033[90m",  # grey
-    "INFO": "\033[97m",  # white
-    "WARNING": "\033[93m",  # yellow
-    "ERROR": "\033[91m",  # red
-    "CRITICAL": "\033[95m",  # magenta
-}
+from typing import Any, Iterable, Optional
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Custom formatters
 # ────────────────────────────────────────────────────────────────────────────────
-
-
-class _ColorFormatter(_logging.Formatter):
-    """Concise colourised formatter for interactive use."""
-
-    def format(self, record: _logging.LogRecord) -> str:  # noqa: D401, N802
-        color = _COLORS.get(record.levelname, "")
-        time_str = _dt.datetime.fromtimestamp(
-            record.created).strftime("%H:%M:%S.%f")[:-3]
-        module_line = f"{record.module}:{record.lineno}"
-        message = super().formatMessage(record)
-        
-        return f"{color}{time_str} | {record.levelname:<8} | [{record.process}] {module_line:<20} | {message}{_RESET}"
-
-
-class _JsonFormatter(_logging.Formatter):
-    """Minimal JSON formatter - dependency-free."""
-
-    _BASE_KEYS = (
-        "timestamp",
-        "level",
-        "logger",
-        "file",
-        "line",
-        "func",
-        "message",
-    )
-
-    def format(self, record: _logging.LogRecord) -> str:  # noqa: D401, N802
-        payload: MutableMapping[str, Any] = {
-            "timestamp": _dt.datetime.fromtimestamp(record.created).isoformat(timespec="milliseconds"),
-            "level": record.levelname,
-            "logger": record.name,
-            "file": record.pathname,
-            "line": record.lineno,
-            "func": record.funcName,
-            "message": record.getMessage(),
-            "process_id": record.process,
-            "thread_id": record.thread,
-        }
-        if record.exc_info:
-            payload["traceback"] = self.formatException(record.exc_info)
-        for k, v in record.__dict__.items():
-            if k not in self._BASE_KEYS and k not in (
-                "msg",
-                "args",
-                "exc_info",
-                "stack_info",
-            ):
-                payload[k] = v
-        return _json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 class _PlainFormatter(_logging.Formatter):
@@ -98,98 +32,107 @@ class _PlainFormatter(_logging.Formatter):
 # ────────────────────────────────────────────────────────────────────────────────
 
 
+def _parse_level(log_level: int | str) -> int:
+    if isinstance(log_level, str):
+        return int(_logging._checkLevel(log_level.upper()))
+    if isinstance(log_level, int):
+        return log_level
+    raise TypeError(
+        f"log_level must be an int or str matching logging levels; got {log_level!r} "
+        f"({type(log_level).__name__})"
+    )
+
+
 def _get_default_logs_dir() -> Path:
-    """Return platform-appropriate cache directory for ax-devil-rtsp logs."""
-    system = _platform.system()
-    if system == "Windows":
-        return Path.home() / "AppData" / "Local" / "ax-devil-rtsp"
-    else:
-        # Linux, macOS, and other Unix-like systems
-        return Path.home() / ".cache" / "ax-devil-rtsp"
+    """Return default directory for ax-devil-rtsp logs."""
+    return Path.home() / ".ax_devil" / "logs" / "ax-devil-rtsp"
 
 
 def setup_logging(
     *,
-    log_level: int = _logging.INFO,
-    json_log_file: Optional[Path] = None,
-    plain_log_file: Optional[Path] = None,
-    max_file_size: int = 25 * 1024 * 1024,  # 25 MB
-    backup_count: int = 10,
+    log_level: int | str = _logging.INFO,
+    log_file: Optional[Path | str] = None,
+    max_file_size: int = 10 * 1024 * 1024,  # 10 MB
+    backup_count: int = 5,
     logs_dir: Path | str | None = None,
     debug: bool = False,
+    console: bool = True,
+    log_to_file: bool = True,
+    propagate: bool = False,
+    queue_only: bool = False,
+    log_queue: Any | None = None,
 ) -> _logging.Logger:
-    """Initialise root + ax-devil-rtsp loggers with JSON *and* plain-text files."""
+    """
+    Configure the ax-devil-rtsp logger (not the root logger).
 
-    if not isinstance(log_level, int):
-        raise TypeError(
-            "log_level must be an int matching logging levels; got "
-            f"{log_level!r} ({type(log_level).__name__})"
-        )
+    - Console: colour, millisecond timestamps, level = log_level
+    - File: rotating plain-text at DEBUG level
+    - Optional queue-only mode for subprocesses
+    """
 
-    if debug:
-        numeric_level = _logging.DEBUG
+    numeric_level = _logging.DEBUG if debug else _parse_level(log_level)
+
+    logger = get_logger("")
+    logger.setLevel(numeric_level)
+    logger.propagate = propagate
+
+    # Clean up previous handlers/listeners we own
+    for handler in list(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
+
+    handlers: list[_logging.Handler] = []
+    plain_path: Path | None = None
+
+    if queue_only:
+        if log_queue is None:
+            raise ValueError("queue_only=True requires a log_queue")
+        queue_handler = _handlers.QueueHandler(log_queue)
+        queue_handler.setLevel(numeric_level)
+        handlers.append(queue_handler)
     else:
-        numeric_level = log_level
+        logs_path = Path(logs_dir) if logs_dir is not None else _get_default_logs_dir()
+        if log_to_file:
+            logs_path.mkdir(parents=True, exist_ok=True)
+            if log_file is not None:
+                plain_path = Path(log_file)
+                plain_path.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                plain_path = logs_path / "ax-devil-rtsp.log"
+            plain_handler = _handlers.RotatingFileHandler(
+                filename=plain_path,
+                maxBytes=max_file_size,
+                backupCount=backup_count,
+                encoding="utf-8",
+                delay=True,
+            )
+            plain_handler.setLevel(_logging.DEBUG)
+            plain_handler.setFormatter(_PlainFormatter())
+            handlers.append(plain_handler)
 
-    if logs_dir is None:
-        logs_path = _get_default_logs_dir()
-    else:
-        logs_path = Path(logs_dir)
-    logs_path.mkdir(parents=True, exist_ok=True)
+        if console:
+            console_handler = _logging.StreamHandler()
+            console_handler.setLevel(numeric_level)
+            console_handler.setFormatter(_PlainFormatter())
+            handlers.append(console_handler)
 
-    if json_log_file is None:
-        json_log_file = logs_path / "ax-devil-rtsp_main.json"
-    if plain_log_file is None:
-        plain_log_file = logs_path / "ax-devil-rtsp_main.log"
+    for handler in handlers:
+        logger.addHandler(handler)
 
-    root = _logging.getLogger()
-    root.handlers.clear()
-    # capture everything; handlers decide display
-    root.setLevel(_logging.DEBUG)
-
-    # ─ JSON file handler ───────────────────────────────────────────────────────
-    json_handler = _handlers.RotatingFileHandler(
-        filename=json_log_file,
-        maxBytes=max_file_size,
-        backupCount=backup_count,
-        encoding="utf-8",
-    )
-    json_handler.setLevel(_logging.DEBUG)
-    json_handler.setFormatter(_JsonFormatter())
-    root.addHandler(json_handler)
-
-    # ─ Plain-text file handler ────────────────────────────────────────────────
-    plain_handler = _handlers.RotatingFileHandler(
-        filename=plain_log_file,
-        maxBytes=max_file_size,
-        backupCount=backup_count,
-        encoding="utf-8",
-    )
-    plain_handler.setLevel(_logging.DEBUG)
-    plain_handler.setFormatter(_PlainFormatter())
-    root.addHandler(plain_handler)
-
-    # ─ Console handler ────────────────────────────────────────────────────────
-    console_handler = _logging.StreamHandler()
-    console_handler.setLevel(numeric_level)
-    console_handler.setFormatter(_ColorFormatter())
-    root.addHandler(console_handler)
-
-    # Quiet noisy libs
+    # Quiet noisy libs without touching root
     for noisy in ("urllib3", "botocore", "s3transfer"):
         _logging.getLogger(noisy).setLevel(_logging.WARNING)
 
-    logger = get_logger("main")
-    logger.info(
-        "Logging initialized",
-        extra={
-            "console_level": _logging.getLevelName(numeric_level),
-            "json_file": str(json_log_file),
-            "plain_file": str(plain_log_file),
-            "rotation_mb": max_file_size // (1024 * 1024),
-            "backups": backup_count,
-        },
-    )
+    if not queue_only:
+        logger.info(
+            "Logging initialized",
+            extra={
+                "console_level": _logging.getLevelName(numeric_level),
+                "log_file": str(plain_path) if plain_path else None,
+                "rotation_mb": max_file_size // (1024 * 1024),
+                "backups": backup_count,
+            },
+        )
     return logger
 
 
@@ -199,9 +142,28 @@ def get_logger(name: str) -> _logging.Logger:  # noqa: D401
     return _logging.getLogger(f"ax-devil-rtsp{suffix}")
 
 
+def create_queue_listener(
+    log_queue: Any, handlers: Iterable[_logging.Handler] | None = None
+) -> _handlers.QueueListener | None:
+    """Create a QueueListener using existing ax-devil-rtsp handlers."""
+    target_handlers = list(handlers) if handlers is not None else [
+        h for h in get_logger("").handlers if not isinstance(h, _handlers.QueueHandler)
+    ]
+    if not target_handlers:
+        return None
+    return _handlers.QueueListener(
+        log_queue, *target_handlers, respect_handler_level=True
+    )
+
+
 # ─ Convenience façade ──────────────────────────────────────────────────────────
 
 
-def init_app_logging(*, log_level: int = _logging.INFO, debug: bool = False) -> _logging.Logger:  # noqa: D401
+def init_app_logging(
+    *,
+    log_level: int | str = _logging.INFO,
+    debug: bool = False,
+    **kwargs: Any,
+) -> _logging.Logger:  # noqa: D401
     """Initialise logging and return the main logger."""
-    return setup_logging(log_level=log_level, debug=debug)
+    return setup_logging(log_level=log_level, debug=debug, **kwargs)

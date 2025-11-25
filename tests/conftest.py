@@ -1,14 +1,12 @@
-import pytest
 import os
 import sys
 from pathlib import Path
 import types
 
+import pytest
+
 from ax_devil_rtsp.utils import build_axis_rtsp_url
 from ax_devil_rtsp.logging import setup_logging
-
-# Configure logging for tests (DEBUG level, detailed format)
-setup_logging(debug=True)
 
 # Ensure src directory is importable without installation
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
@@ -38,6 +36,17 @@ def rtsp_credentials():
     }
 
 from enhanced_rtsp_server import dual_stream_rtsp_server
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _configure_test_logging(tmp_path_factory):
+    """Configure logging to a temp directory for tests."""
+    logs_dir = tmp_path_factory.mktemp("logs")
+    logger = setup_logging(log_level="DEBUG", logs_dir=logs_dir)
+    yield
+    for handler in list(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
 
 @pytest.fixture(scope="session")
 def rtsp_url(rtsp_credentials, dual_stream_rtsp_server):

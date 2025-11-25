@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import queue
 import sys
 import time
@@ -104,8 +103,11 @@ def _display_loop(video_frames, args, retriever, logger):
 
 def main(**kwargs):
     args = SimpleNamespace(**kwargs)
-    log_level = getattr(logging, args.log_level.upper(), logging.INFO)
-    init_app_logging(log_level=log_level)
+    init_app_logging(
+        log_level=args.log_level,
+        log_file=getattr(args, "log_file", None),
+        logs_dir=getattr(args, "logs_dir", None),
+    )
     logger = get_logger("cli")
     logger.info(f"Starting with args: {args}")
 
@@ -282,6 +284,18 @@ def _shared_options(func):
         show_default=True,
         type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
         help="Logging verbosity",
+    )(func)
+
+    func = click.option(
+        "--log-file",
+        type=click.Path(path_type=str, dir_okay=False, writable=True),
+        help="Path to the rotating log file (defaults to ~/.ax_devil/logs/ax-devil-rtsp/ax-devil-rtsp.log)",
+    )(func)
+
+    func = click.option(
+        "--logs-dir",
+        type=click.Path(path_type=str, file_okay=False, writable=True),
+        help="Directory for log files (overrides default cache directory)",
     )(func)
 
     func = click.option(
