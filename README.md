@@ -1,8 +1,12 @@
 # ax-devil-rtsp
 
+<div align="center">
+
 Python package for streaming RTSP video and AXIS Scene Metadata (referred to here as "application data") from Axis devices. Includes a Python API with callbacks and a CLI demo for quick inspection.
 
-See also: [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-api) and [ax-devil-mqtt](https://github.com/rasmusrynell/ax-devil-mqtt) for related tools.
+See also [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-api) and [ax-devil-mqtt](https://github.com/rasmusrynell/ax-devil-mqtt) for related tools.
+
+</div>
 
 ---
 
