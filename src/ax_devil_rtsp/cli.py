@@ -9,14 +9,13 @@ import click
 import cv2
 import numpy as np
 
-from ..logging import init_app_logging, get_logger
-
-from ..rtsp_data_retrievers import (
+from .logging import init_app_logging, get_logger
+from .rtsp_data_retrievers import (
     RtspApplicationDataRetriever,
     RtspDataRetriever,
     RtspVideoDataRetriever,
 )
-from ..utils import build_axis_rtsp_url
+from .utils import build_axis_rtsp_url
 
 
 def simple_video_processing_example(
