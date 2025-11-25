@@ -154,10 +154,11 @@ black src tests
 
 ---
 
-## License
-
-MIT License - see `LICENSE`.
-
 ## Disclaimer
 
-This project is independent and not affiliated with Axis Communications AB. For official resources, visit the [Axis developer documentation](https://developer.axis.com/).
+This project is an independent, community-driven implementation and is **not** affiliated with or endorsed by Axis Communications AB. For official APIs and development resources, see the [Axis Developer Community](https://www.axis.com/en-us/developer).
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
