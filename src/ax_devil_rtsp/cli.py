@@ -4,27 +4,26 @@ import queue
 import sys
 import time
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import click
-import cv2
-import numpy as np
 
-from .utils.logging import init_app_logging, get_logger
-from .rtsp_data_retrievers import (
-    RtspApplicationDataRetriever,
-    RtspDataRetriever,
-    RtspVideoDataRetriever,
-)
+from .doctor import doctor_command
 from .utils import build_axis_rtsp_url
+from .utils.logging import init_app_logging, get_logger
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 def simple_video_processing_example(
-    payload: dict, shared_config: dict
-) -> np.ndarray:
+    payload: dict, shared_config: dict,
+) -> "np.ndarray":
     """
-    Example video processing function that demonstrates the video_processing_fn feature.
-    Adds a timestamp overlay and optionally applies brightness adjustment.
+    Example video processing hook with a timestamp overlay and brightness adjustment.
     """
+    import cv2
+
     frame = payload["data"]
     processed = frame.copy()
 
@@ -65,6 +64,8 @@ def simple_video_processing_example(
 
 def _display_loop(video_frames, args, retriever):
     """Display loop for showing video frames."""
+    import cv2
+
     if args.only_application_data:
         print("Application data only mode - no video display")
         try:
@@ -101,6 +102,12 @@ def _display_loop(video_frames, args, retriever):
 
 
 def main(**kwargs):
+    from .rtsp_data_retrievers import (
+        RtspApplicationDataRetriever,
+        RtspDataRetriever,
+        RtspVideoDataRetriever,
+    )
+
     args = SimpleNamespace(**kwargs)
     init_app_logging(
         log_level=args.log_level,
@@ -177,7 +184,7 @@ def main(**kwargs):
             "frame_count": 0,
         }
         logger.info(
-            "[DEMO] Video processing enabled with brightness adjustment: "
+            "Video processing enabled with brightness adjustment: "
             f"{args.brightness_adjustment}"
         )
 
@@ -189,7 +196,7 @@ def main(**kwargs):
 
     retriever_class, desc = retriever_classes[(
         args.only_video, args.only_application_data)]
-    logger.info(f"[DEMO] Using {retriever_class.__name__} ({desc})")
+    logger.info(f"Using {retriever_class.__name__} ({desc})")
 
     # Build kwargs based on retriever class signature
     kwargs = {
@@ -215,7 +222,7 @@ def main(**kwargs):
 
     try:
         print(
-            f"[DEMO] Using {'manual lifecycle' if args.manual_lifecycle else 'context manager'}")
+            f"Using {'manual lifecycle' if args.manual_lifecycle else 'context manager'}")
 
         if args.manual_lifecycle:
             retriever.start()
@@ -237,6 +244,7 @@ def main(**kwargs):
     finally:
         logger.info("Cleaning up...")
         if not args.only_application_data:
+            import cv2
             cv2.destroyAllWindows()
 
 
@@ -257,8 +265,7 @@ def _shared_options(func):
         default=False,
         show_default=True,
         help=(
-            "Enable only video frames (disable application data) - "
-            "demonstrates RtspVideoDataRetriever"
+            "Enable only video frames (disable application data)"
         ),
     )(func)
 
@@ -268,8 +275,7 @@ def _shared_options(func):
         default=False,
         show_default=True,
         help=(
-            "Enable only application data XML (disable video) - "
-            "demonstrates RtspApplicationDataRetriever"
+            "Enable only application data XML (disable video)"
         ),
     )(func)
 
@@ -307,7 +313,7 @@ def _shared_options(func):
         default=False,
         show_default=True,
         help=(
-            "Demonstrate video_processing_fn with timestamp overlay "
+            "Enable example video processing with timestamp overlay "
             "and brightness adjustment"
         ),
     )(func)
@@ -325,13 +331,16 @@ def _shared_options(func):
         is_flag=True,
         default=False,
         show_default=True,
-        help="Demonstrate manual start()/stop() instead of context manager",
+        help="Use manual start()/stop() instead of the context manager",
     )(func)
 
     return func
 
 
-@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.group(
+    context_settings={"help_option_names": ["-h", "--help"]},
+    invoke_without_command=True,
+)
 @click.option(
     "--url",
     "rtsp_url",
@@ -386,8 +395,17 @@ def _shared_options(func):
     ),
 )
 @_shared_options
-def cli(rtsp_url: str | None, device_ip: str | None, **kwargs) -> None:
+@click.pass_context
+def cli(
+    ctx: click.Context,
+    rtsp_url: str | None,
+    device_ip: str | None,
+    **kwargs,
+) -> None:
     """Retrieve RTSP video and application data from Axis devices."""
+    if ctx.invoked_subcommand is not None:
+        return
+
     if rtsp_url:
         main(rtsp_url=rtsp_url, **kwargs)
         return
@@ -399,6 +417,9 @@ def cli(rtsp_url: str | None, device_ip: str | None, **kwargs) -> None:
         )
 
     main(device_ip=device_ip, **kwargs)
+
+
+cli.add_command(doctor_command)
 
 
 if __name__ == "__main__":

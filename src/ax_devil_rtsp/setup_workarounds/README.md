@@ -97,7 +97,7 @@ if detector.is_vulnerable():
 Use the dependency checker to see workaround status:
 
 ```bash
-python tools/check_dependencies.py
+ax-devil-rtsp doctor
 ```
 
 Or check programmatically:
@@ -114,7 +114,7 @@ print(status)
 2. Implement detection and workaround classes following the `libproxy_segfault.py` pattern
 3. Add the workaround call to `utils/deps.py`'s `ensure_gi_ready()` function
 4. Export the workaround function from `setup_workarounds/__init__.py`
-5. Update `tools/check_dependencies.py` to report the new workaround
+5. Update `ax_devil_rtsp/doctor.py` to report the new workaround
 6. Document the issue and solution in this README
 
 ## Design Principles

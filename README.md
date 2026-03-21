@@ -12,20 +12,26 @@ See also [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-a
 
 ## Install
 
+On Linux, this package depends on native GStreamer, GI, and Cairo libraries.
+
 ```bash
+sudo apt-get update
+sudo apt-get install -y \
+  gcc cmake pkg-config python3-dev libcairo2-dev libffi-dev libglib2.0-dev \
+  libgirepository-2.0-dev gobject-introspection \
+  python3-gi python3-gst-1.0 \
+  gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
+  gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+
 pip install ax-devil-rtsp
 ```
 
 ### System dependencies (Linux)
 
-PyGObject and GStreamer must be available via your package manager.
-
 ```bash
-# Check what you already have
-python tools/dep.py --check
-
-# Show Ubuntu/Debian install commands
-python tools/dep.py --install
+# Check your environment after install
+ax-devil-rtsp doctor
 ```
 
 ---
@@ -65,8 +71,9 @@ Run `ax-devil-rtsp --help` for the full reference. Common flows:
   ```
 - Adjust the stream: `--resolution 1280x720`, `--source 2`, `--latency 200`
   (only applies when building the URL without `--url`)
-- Demo helpers: `--enable-video-processing`, `--brightness-adjustment 25`, `--manual-lifecycle`
+- Optional helpers: `--enable-video-processing`, `--brightness-adjustment 25`, `--manual-lifecycle`
   (`--url` skips device-specific URL construction)
+- Check host dependencies and workaround status: `ax-devil-rtsp doctor`
 
 ---
 
@@ -161,4 +168,3 @@ This project is an independent, community-driven implementation and is **not** a
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-

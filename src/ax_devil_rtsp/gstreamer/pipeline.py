@@ -3,7 +3,7 @@ GStreamer pipeline setup and element creation functionality.
 """
 
 from __future__ import annotations
-from gi.repository import Gst, GstRtsp
+from gi.repository import Gst
 import gi
 
 from typing import Optional
@@ -14,7 +14,10 @@ logger = get_logger(__name__)
 
 
 gi.require_version("Gst", "1.0")
-gi.require_version("GstRtsp", "1.0")
+
+# GStreamer's RTSPLowerTrans enum bitmask for TCP|UDP.
+# Keeping this numeric avoids a hard runtime dependency on the GstRtsp typelib.
+RTSP_PROTOCOLS_TCP_UDP = 0x1 | 0x4
 
 
 class PipelineSetupMixin:
@@ -50,8 +53,7 @@ class PipelineSetupMixin:
         
         src.props.location = self.rtsp_url
         src.props.latency = self.latency
-        src.props.protocols = (GstRtsp.RTSPLowerTrans.TCP |
-                               GstRtsp.RTSPLowerTrans.UDP)
+        src.props.protocols = RTSP_PROTOCOLS_TCP_UDP
         src.props.tcp_timeout = 100_000_000     # µs until we declare the server dead
         src.props.drop_on_latency = False
 

@@ -26,7 +26,6 @@ def ensure_gi_ready() -> None:
 
         # Require core namespaces used by this project
         gi.require_version("Gst", "1.0")
-        gi.require_version("GstRtsp", "1.0")
         gi.require_version("GstRtp", "1.0")
 
         # Import to validate binding availability and lazy-load shared libs
@@ -35,10 +34,9 @@ def ensure_gi_ready() -> None:
         guidance = (
             "PyGObject/GStreamer not available or incompatible.\n\n"
             "🔧 Check dependencies:\n"
-            "   python tools/dep.py --check\n\n"
-            "🛠️ Get install commands (Ubuntu/Debian):\n"
-            "   python tools/dep.py --install\n\n"
-            "For other platforms, see README.md for manual installation.\n\n"
+            "   ax-devil-rtsp doctor\n\n"
+            "Install the required GStreamer/GI system packages from README.md,\n"
+            "then retry.\n\n"
             f"Original error: {exc}"
         )
         raise RuntimeError(guidance) from exc

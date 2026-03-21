@@ -37,7 +37,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgirepository-2.0-dev gobject-introspection libcairo2-dev libffi-dev pkg-config gcc libglib2.0-dev \
+            libgirepository-2.0-dev gobject-introspection libcairo2-dev libffi-dev pkg-config gcc cmake python3-dev libglib2.0-dev \
             gstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
             gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools \
             gstreamer1.0-rtsp libgstrtspserver-1.0-0 \
@@ -54,7 +54,7 @@ jobs:
 
       - name: Check dependencies
         run: |
-          python tools/dep.py --check
+          ax-devil-rtsp doctor
 
       - name: Run tests
         run: |
@@ -88,7 +88,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgirepository-2.0-dev gobject-introspection libcairo2-dev libffi-dev pkg-config gcc libglib2.0-dev \
+            libgirepository-2.0-dev gobject-introspection libcairo2-dev libffi-dev pkg-config gcc cmake python3-dev libglib2.0-dev \
             gstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-tools \
             gstreamer1.0-rtsp libgstrtspserver-1.0-0 \
             gir1.2-gstreamer-1.0 \
