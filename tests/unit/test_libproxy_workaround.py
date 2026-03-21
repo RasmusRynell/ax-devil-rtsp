@@ -8,6 +8,7 @@ using mocked system conditions.
 import os
 import platform
 import subprocess
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
@@ -311,23 +312,19 @@ class TestLibproxyWorkaround:
         workaround = LibproxyWorkaround()
         
         with patch.dict(os.environ, {'GIO_MODULE_DIR': '/dev/null'}):
-            # Mock the imports inside the validate method
-            with patch('builtins.__import__') as mock_import:
-                # Mock gi module
-                mock_gi = MagicMock()
-                mock_gst = MagicMock()
-                mock_gst.is_initialized.return_value = True
-                
-                def import_side_effect(name, *args, **kwargs):
-                    if name == 'gi':
-                        return mock_gi
-                    return MagicMock()
-                    
-                mock_import.side_effect = import_side_effect
-                
-                # Mock the gi.repository import
-                with patch.dict('sys.modules', {'gi.repository': MagicMock(Gst=mock_gst)}):
-                    result = workaround.validate()
+            mock_gi = MagicMock()
+            mock_gst = MagicMock()
+            mock_gst.is_initialized.return_value = True
+
+            mock_repository = types.ModuleType('gi.repository')
+            mock_repository.Gst = mock_gst
+            mock_gi.repository = mock_repository
+
+            with patch.dict(
+                'sys.modules',
+                {'gi': mock_gi, 'gi.repository': mock_repository},
+            ):
+                result = workaround.validate()
         
         assert result is True
     
@@ -336,7 +333,7 @@ class TestLibproxyWorkaround:
         workaround = LibproxyWorkaround()
         
         with patch.dict(os.environ, {'GIO_MODULE_DIR': '/dev/null'}):
-            with patch('builtins.__import__', side_effect=ImportError('Mock import error')):
+            with patch.dict('sys.modules', {'gi': None}):
                 result = workaround.validate()
         
         assert result is False
