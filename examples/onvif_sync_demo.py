@@ -72,11 +72,11 @@ ONVIF_NS = {"tt": "http://www.onvif.org/ver10/schema"}
 _GLIB_BYTES_HAS_GET_DATA = hasattr(GLib.Bytes.new(b""), "get_data")
 
 
-def _read_ext_bytes(ext_bytes: bytes | GLib.Bytes) -> bytes:
-    """Unwrap GLib.Bytes if needed. Detected once at import time."""
+def _unwrap_glib_bytes(data: bytes | GLib.Bytes) -> bytes:
+    """Unwrap GLib.Bytes to raw bytes if needed. Detected once at import time."""
     if _GLIB_BYTES_HAS_GET_DATA:
-        return ext_bytes.get_data()
-    return ext_bytes
+        return data.get_data()
+    return data
 
 
 @dataclass
@@ -126,7 +126,7 @@ def extract_ntp_timestamp_from_video_packet(rtp_buffer) -> datetime | None:
     if ext_id != ONVIF_RTP_EXT_ID:
         return None
 
-    data = _read_ext_bytes(ext_bytes)
+    data = _unwrap_glib_bytes(ext_bytes)
     if not data or len(data) < 12:
         return None
 
@@ -187,9 +187,14 @@ def find_closest_match(target_time, buffer, max_delta=0.01):
 # ║  You can stop reading here if you only need the concepts.                   ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 #
+#   Why a FIFO queue (not a single slot) for NTP↔frame pairing:
+#     avdec_h264 with frame threading (the default on multi-core) delays output
+#     by 1+ frames. A single-slot "latest NTP" would pair each decoded frame
+#     with the *next* frame's NTP. The queue preserves correct ordering.
+#
 #   Data flow:
-#     Video RTP packets  →  _on_video_rtp_packet (Step 2: extract NTP)
-#                        →  _on_video_frame      (buffer the timestamp)
+#     Video RTP packets  →  _on_video_rtp_packet (Step 2: extract NTP, enqueue on marker)
+#                        →  _on_video_frame      (dequeue NTP, buffer the timestamp)
 #     Metadata RTP pkts  →  _on_metadata_packet  (reassemble XML)
 #                        →  Step 3: extract UtcTime
 #                        →  Step 4: find closest video timestamp → print match
@@ -205,8 +210,9 @@ class SyncDemoPipeline:
     def __init__(self, rtsp_url, latency_ms=200):
         Gst.init(None)
         self._loop = GLib.MainLoop()
-        self._latest_ntp = None
-        self._video_buffer = deque(maxlen=90)  # ~3s of video NTP timestamps
+        self._current_frame_ntp = None  # NTP accumulator for in-flight RTP packets
+        self._ntp_queue = deque()  # One NTP per complete frame, consumed by _on_video_frame
+        self._video_buffer = deque(maxlen=90)  # ~3s of matched video NTP timestamps
         self._lock = threading.Lock()
         self._metadata_xml_buf = bytearray()
         self.stats = {"video": 0, "metadata": 0, "synced": 0}
@@ -273,7 +279,13 @@ class SyncDemoPipeline:
         capsf.link(msink)
 
     def _on_video_rtp_packet(self, _pad, info):
-        """Pad probe: reads NTP from each video RTP packet (Step 2)."""
+        """Pad probe: reads NTP from each video RTP packet (Step 2).
+
+        H.264 frames span multiple RTP packets sharing the same RTP timestamp.
+        The last packet of each frame has the marker bit set. We capture the NTP
+        from each packet and enqueue it when the marker bit signals frame-complete.
+        This gives a 1:1 NTP-per-decoded-frame correspondence via the queue.
+        """
         buf = info.get_buffer()
         if not buf:
             return Gst.PadProbeReturn.OK
@@ -283,14 +295,22 @@ class SyncDemoPipeline:
         try:
             ntp = extract_ntp_timestamp_from_video_packet(rtp_buf)
             if ntp:
+                self._current_frame_ntp = ntp
+            # Marker bit = last packet of this frame → enqueue for the decoder output
+            if rtp_buf.get_marker() and self._current_frame_ntp:
                 with self._lock:
-                    self._latest_ntp = ntp
+                    self._ntp_queue.append(self._current_frame_ntp)
+                self._current_frame_ntp = None
         finally:
             GstRtp.RTPBuffer.unmap(rtp_buf)
         return Gst.PadProbeReturn.OK
 
     def _on_video_frame(self, sink):
-        """Buffer each decoded frame's NTP timestamp for later matching."""
+        """Buffer each decoded frame's NTP timestamp for later matching.
+
+        Pops the next NTP from the queue (enqueued by _on_video_rtp_packet at
+        each frame boundary). FIFO order guarantees correct frame↔NTP pairing.
+        """
         sample = sink.emit("pull-sample")
         if not sample:
             return Gst.FlowReturn.ERROR
@@ -298,8 +318,8 @@ class SyncDemoPipeline:
         self.stats["video"] += 1
 
         with self._lock:
-            video_ntp = self._latest_ntp
-            if video_ntp:
+            if self._ntp_queue:
+                video_ntp = self._ntp_queue.popleft()
                 self._video_buffer.append(
                     TimestampedFrame(time=video_ntp, frame_nr=self.stats["video"])
                 )
@@ -317,7 +337,7 @@ class SyncDemoPipeline:
         ok, rtp_buf = GstRtp.RTPBuffer.map(buf, Gst.MapFlags.READ)
         if not ok:
             return Gst.FlowReturn.OK
-        payload = bytes(_read_ext_bytes(rtp_buf.get_payload()))  # copy before unmap
+        payload = bytes(_unwrap_glib_bytes(rtp_buf.get_payload()))  # copy before unmap
         is_last_fragment = rtp_buf.get_marker()
         GstRtp.RTPBuffer.unmap(rtp_buf)
 
