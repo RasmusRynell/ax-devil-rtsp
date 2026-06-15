@@ -2,9 +2,10 @@
 Unit test for retriever lifecycle management.
 """
 
-import pytest
-import time
 from unittest.mock import Mock, patch
+
+import pytest
+
 from ax_devil_rtsp.rtsp_data_retrievers import RtspVideoDataRetriever
 
 
@@ -13,26 +14,25 @@ def test_multiple_start_stop_cycles():
     Test that retrievers can handle multiple start/stop cycles safely.
     """
     retriever = RtspVideoDataRetriever(
-        rtsp_url="rtsp://test.url/stream",
-        connection_timeout=5
+        rtsp_url="rtsp://test.url/stream", connection_timeout=5
     )
-    
+
     # Initially not running
     assert not retriever.is_running
-    
+
     # Test multiple cycles
-    for i in range(3):
+    for _i in range(3):
         # Mock the process to avoid actual RTSP connection
-        with patch('multiprocessing.Process') as mock_process_class:
+        with patch("multiprocessing.Process") as mock_process_class:
             mock_process = Mock()
             mock_process.is_alive.return_value = True
             mock_process.exitcode = None  # Process is alive, no exit code yet
             mock_process_class.return_value = mock_process
-            
-            with patch('multiprocessing.Queue'):
+
+            with patch("multiprocessing.Queue"):
                 retriever.start()
                 assert retriever.is_running
-                
+
                 # When stopping, process becomes dead with exit code
                 mock_process.is_alive.return_value = False
                 mock_process.exitcode = 0  # Normal termination
@@ -44,14 +44,12 @@ def test_stop_without_start():
     """
     Test that calling stop() without start() is safe.
     """
-    retriever = RtspVideoDataRetriever(
-        rtsp_url="rtsp://test.url/stream"
-    )
-    
+    retriever = RtspVideoDataRetriever(rtsp_url="rtsp://test.url/stream")
+
     # Should be safe to call stop without start
     retriever.stop()
     assert not retriever.is_running
-    
+
     # Multiple stops should also be safe
     retriever.stop()
     retriever.stop()
@@ -62,23 +60,21 @@ def test_start_when_already_started():
     """
     Test that starting an already started retriever raises an error.
     """
-    retriever = RtspVideoDataRetriever(
-        rtsp_url="rtsp://test.url/stream"
-    )
-    
-    with patch('multiprocessing.Process') as mock_process_class:
+    retriever = RtspVideoDataRetriever(rtsp_url="rtsp://test.url/stream")
+
+    with patch("multiprocessing.Process") as mock_process_class:
         mock_process = Mock()
         mock_process.is_alive.return_value = True
         mock_process.exitcode = None  # Process is alive, no exit code yet
         mock_process_class.return_value = mock_process
-        
-        with patch('multiprocessing.Queue'):
+
+        with patch("multiprocessing.Queue"):
             retriever.start()
-            
+
             # Starting again should raise error
             with pytest.raises(RuntimeError, match="already started"):
                 retriever.start()
-            
+
             # When stopping, process becomes dead with exit code
             mock_process.is_alive.return_value = False
             mock_process.exitcode = 0  # Normal termination
@@ -89,29 +85,27 @@ def test_is_running_property():
     """
     Test that is_running property accurately reflects retriever state.
     """
-    retriever = RtspVideoDataRetriever(
-        rtsp_url="rtsp://test.url/stream"
-    )
-    
+    retriever = RtspVideoDataRetriever(rtsp_url="rtsp://test.url/stream")
+
     # Initially not running
     assert not retriever.is_running
-    
-    with patch('multiprocessing.Process') as mock_process_class:
+
+    with patch("multiprocessing.Process") as mock_process_class:
         mock_process = Mock()
         mock_process_class.return_value = mock_process
-        
-        with patch('multiprocessing.Queue'):
+
+        with patch("multiprocessing.Queue"):
             # When process is alive, should be running
             mock_process.is_alive.return_value = True
             mock_process.exitcode = None  # Process is alive, no exit code yet
             retriever.start()
             assert retriever.is_running
-            
+
             # When process is dead, should not be running
             mock_process.is_alive.return_value = False
             mock_process.exitcode = 0  # Process has exited normally
             assert not retriever.is_running
-            
+
             retriever.stop()
             assert not retriever.is_running
 
@@ -120,22 +114,51 @@ def test_close_method():
     """
     Test that close() method works as alias for stop().
     """
-    retriever = RtspVideoDataRetriever(
-        rtsp_url="rtsp://test.url/stream"
-    )
-    
-    with patch('multiprocessing.Process') as mock_process_class:
+    retriever = RtspVideoDataRetriever(rtsp_url="rtsp://test.url/stream")
+
+    with patch("multiprocessing.Process") as mock_process_class:
         mock_process = Mock()
         mock_process.is_alive.return_value = True
         mock_process.exitcode = None  # Process is alive, no exit code yet
         mock_process_class.return_value = mock_process
-        
-        with patch('multiprocessing.Queue'):
+
+        with patch("multiprocessing.Queue"):
             retriever.start()
             assert retriever.is_running
-            
+
             # When closing, process becomes dead with exit code
             mock_process.is_alive.return_value = False
             mock_process.exitcode = 0  # Normal termination
             retriever.close()  # Should work like stop()
-            assert not retriever.is_running 
+            assert not retriever.is_running
+
+
+def test_stop_requests_graceful_shutdown_before_terminate():
+    """
+    Test that stop() asks the child process to shut down before terminate().
+    """
+    retriever = RtspVideoDataRetriever(rtsp_url="rtsp://test.url/stream")
+
+    with (
+        patch("multiprocessing.Process") as mock_process_class,
+        patch("multiprocessing.Queue"),
+        patch("multiprocessing.Event") as mock_event_class,
+    ):
+        mock_process = Mock()
+        mock_process.is_alive.return_value = True
+        mock_process.exitcode = 0
+
+        def join_side_effect(timeout=None):
+            mock_process.is_alive.return_value = False
+
+        mock_process.join.side_effect = join_side_effect
+        mock_process_class.return_value = mock_process
+        mock_event = Mock()
+        mock_event_class.return_value = mock_event
+
+        retriever.start()
+        retriever.stop()
+
+        mock_event.set.assert_called_once()
+        mock_process.terminate.assert_not_called()
+        mock_process.kill.assert_not_called()

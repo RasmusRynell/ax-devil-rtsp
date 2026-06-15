@@ -3,10 +3,12 @@ GStreamer pipeline setup and element creation functionality.
 """
 
 from __future__ import annotations
-from gi.repository import Gst
-import gi
 
+from pathlib import Path
 from typing import Optional
+
+import gi
+from gi.repository import Gst
 
 from ..utils.logging import get_logger
 
@@ -33,11 +35,18 @@ class PipelineSetupMixin:
         self.m_jit: Optional[Gst.Element] = None
         self.application_data_branch_built: bool = False
         self.video_branch_enabled: bool = True
+        self.decoded_video_branch_enabled: bool = True
         self.application_data_branch_enabled: bool = True
+        self.raw_recording_path: Optional[Path] = None
 
     def _setup_elements(self) -> None:
         """Set up all pipeline elements."""
-        logger.debug(f"Setting up pipeline: video={self.video_branch_enabled}, app_data={self.application_data_branch_enabled}, latency={self.latency}ms")
+        logger.debug(
+            "Setting up pipeline: "
+            f"video={self.video_branch_enabled}, "
+            f"app_data={self.application_data_branch_enabled}, "
+            f"latency={self.latency}ms"
+        )
         self._create_rtspsrc()
         if self.video_branch_enabled:
             self._create_video_branch()
@@ -65,11 +74,22 @@ class PipelineSetupMixin:
 
     def _create_video_branch(self) -> None:
         """Add and link video depay, parser, decoder, converter, and appsink."""
-        element_names = ["rtph264depay", "h264parse", "avdec_h264", "videoconvert", "capsfilter", "appsink"]
+        if self.raw_recording_path is not None:
+            self._create_recording_video_branch()
+            return
+
+        element_names = [
+            "rtph264depay",
+            "h264parse",
+            "avdec_h264",
+            "videoconvert",
+            "capsfilter",
+            "appsink",
+        ]
         element_aliases = ["v_depay", "v_parse", "v_dec", "v_conv", "v_caps", "v_sink"]
         
         elems = {}
-        for factory_name, alias in zip(element_names, element_aliases):
+        for factory_name, alias in zip(element_names, element_aliases, strict=True):
             elem = Gst.ElementFactory.make(factory_name, alias)
             if not elem:
                 logger.error(f"Failed to create video element: {factory_name}")
@@ -92,7 +112,7 @@ class PipelineSetupMixin:
             self.pipeline.add(el)
 
         link_order = ['v_depay', 'v_parse', 'v_dec', 'v_conv', 'v_caps', 'v_sink']
-        for src_name, dst_name in zip(link_order, link_order[1:]):
+        for src_name, dst_name in zip(link_order, link_order[1:], strict=False):
             if not elems[src_name].link(elems[dst_name]):
                 logger.error(f"Failed to link video elements: {src_name} -> {dst_name}")
                 raise RuntimeError(f"Failed to link {src_name} to {dst_name}")
@@ -106,6 +126,208 @@ class PipelineSetupMixin:
         
         self.v_depay = elems['v_depay']
         logger.debug("Video branch created")
+
+    def _create_recording_video_branch(self) -> None:
+        """Create a video branch that also records parsed H.264 to MP4."""
+        assert self.raw_recording_path is not None
+
+        if not self.decoded_video_branch_enabled:
+            self._create_recording_only_video_branch()
+            return
+
+        element_names = [
+            "rtph264depay",
+            "tee",
+            "queue",
+            "h264parse",
+            "avdec_h264",
+            "videoconvert",
+            "capsfilter",
+            "appsink",
+            "queue",
+            "h264parse",
+            "mp4mux",
+            "filesink",
+        ]
+        element_aliases = [
+            "v_depay",
+            "v_tee",
+            "v_decode_queue",
+            "v_decode_parse",
+            "v_dec",
+            "v_conv",
+            "v_caps",
+            "v_sink",
+            "v_record_queue",
+            "v_record_parse",
+            "v_record_mux",
+            "v_record_sink",
+        ]
+
+        elems = {}
+        for factory_name, alias in zip(element_names, element_aliases, strict=True):
+            elem = Gst.ElementFactory.make(factory_name, alias)
+            if not elem:
+                logger.error(
+                    f"Failed to create recording video element: {factory_name}"
+                )
+            elems[alias] = elem
+
+        if not all(elems.values()):
+            failed_elements = [alias for alias, elem in elems.items() if elem is None]
+            logger.error(
+                f"Failed to create recording video elements: {failed_elements}"
+            )
+            raise RuntimeError(
+                "Failed to create one or more recording video elements"
+            )
+
+        logger.debug("Recording video elements created")
+
+        elems["v_caps"].props.caps = Gst.Caps.from_string("video/x-raw,format=RGB")
+        elems["v_sink"].props.emit_signals = True
+        elems["v_sink"].props.sync = False
+        elems["v_sink"].connect("new-sample", self._on_new_video_sample)
+        elems["v_record_sink"].props.location = str(self.raw_recording_path)
+        elems["v_record_sink"].props.sync = False
+
+        # Keep preview callbacks from blocking recording if the host app is slow.
+        elems["v_decode_queue"].props.max_size_buffers = 2
+        elems["v_decode_queue"].props.max_size_bytes = 0
+        elems["v_decode_queue"].props.max_size_time = 0
+        elems["v_decode_queue"].props.leaky = 2  # downstream
+
+        if hasattr(elems["v_record_parse"].props, "config_interval"):
+            elems["v_record_parse"].props.config_interval = -1
+
+        for el in elems.values():
+            self.pipeline.add(el)
+
+        pre_tee_order = ["v_depay", "v_tee"]
+        for src_name, dst_name in zip(pre_tee_order, pre_tee_order[1:], strict=False):
+            if not elems[src_name].link(elems[dst_name]):
+                logger.error(
+                    "Failed to link recording video elements: "
+                    f"{src_name} -> {dst_name}"
+                )
+                raise RuntimeError(f"Failed to link {src_name} to {dst_name}")
+
+        preview_order = [
+            "v_decode_queue",
+            "v_decode_parse",
+            "v_dec",
+            "v_conv",
+            "v_caps",
+            "v_sink",
+        ]
+        for src_name, dst_name in zip(preview_order, preview_order[1:], strict=False):
+            if not elems[src_name].link(elems[dst_name]):
+                logger.error(
+                    f"Failed to link preview branch elements: {src_name} -> {dst_name}"
+                )
+                raise RuntimeError(f"Failed to link {src_name} to {dst_name}")
+
+        record_order = [
+            "v_record_queue",
+            "v_record_parse",
+            "v_record_mux",
+            "v_record_sink",
+        ]
+        for src_name, dst_name in zip(record_order, record_order[1:], strict=False):
+            if not elems[src_name].link(elems[dst_name]):
+                logger.error(
+                    "Failed to link recording branch elements: "
+                    f"{src_name} -> {dst_name}"
+                )
+                raise RuntimeError(f"Failed to link {src_name} to {dst_name}")
+
+        self._link_tee_to_queue(
+            elems["v_tee"],
+            elems["v_decode_queue"],
+            "preview",
+        )
+        self._link_tee_to_queue(
+            elems["v_tee"],
+            elems["v_record_queue"],
+            "recording",
+        )
+
+        pad = elems["v_depay"].get_static_pad("sink")
+        if pad:
+            pad.add_probe(Gst.PadProbeType.BUFFER, self._rtp_probe)
+        else:
+            logger.warning("Could not get sink pad from v_depay for RTP probe")
+
+        self.v_depay = elems["v_depay"]
+        logger.info(f"Raw RTSP recording enabled: {self.raw_recording_path}")
+
+    def _link_tee_to_queue(
+        self,
+        tee: Gst.Element,
+        queue: Gst.Element,
+        branch_name: str,
+    ) -> None:
+        """Link a tee output to a queue using an explicit tee request pad."""
+        tee_src_pad = tee.request_pad_simple("src_%u")
+        queue_sink_pad = queue.get_static_pad("sink")
+        if tee_src_pad is None or queue_sink_pad is None:
+            raise RuntimeError(f"Failed to get pads for video tee {branch_name} branch")
+
+        result = tee_src_pad.link(queue_sink_pad)
+        if result != Gst.PadLinkReturn.OK:
+            tee.release_request_pad(tee_src_pad)
+            raise RuntimeError(f"Failed to link video tee to {branch_name} branch")
+
+    def _create_recording_only_video_branch(self) -> None:
+        """Create a stream-copy recording branch with no decoded video output."""
+        assert self.raw_recording_path is not None
+
+        element_names = ["rtph264depay", "h264parse", "mp4mux", "filesink"]
+        element_aliases = ["v_depay", "v_parse", "v_record_mux", "v_record_sink"]
+
+        elems = {}
+        for factory_name, alias in zip(element_names, element_aliases, strict=True):
+            elem = Gst.ElementFactory.make(factory_name, alias)
+            if not elem:
+                logger.error(
+                    f"Failed to create recording-only video element: {factory_name}"
+                )
+            elems[alias] = elem
+
+        if not all(elems.values()):
+            failed_elements = [alias for alias, elem in elems.items() if elem is None]
+            logger.error(
+                f"Failed to create recording-only video elements: {failed_elements}"
+            )
+            raise RuntimeError(
+                "Failed to create one or more recording-only video elements"
+            )
+
+        elems["v_record_sink"].props.location = str(self.raw_recording_path)
+        elems["v_record_sink"].props.sync = False
+        if hasattr(elems["v_parse"].props, "config_interval"):
+            elems["v_parse"].props.config_interval = -1
+
+        for el in elems.values():
+            self.pipeline.add(el)
+
+        link_order = ["v_depay", "v_parse", "v_record_mux", "v_record_sink"]
+        for src_name, dst_name in zip(link_order, link_order[1:], strict=False):
+            if not elems[src_name].link(elems[dst_name]):
+                logger.error(
+                    "Failed to link recording-only video elements: "
+                    f"{src_name} -> {dst_name}"
+                )
+                raise RuntimeError(f"Failed to link {src_name} to {dst_name}")
+
+        pad = elems["v_depay"].get_static_pad("sink")
+        if pad:
+            pad.add_probe(Gst.PadProbeType.BUFFER, self._rtp_probe)
+        else:
+            logger.warning("Could not get sink pad from v_depay for RTP probe")
+
+        self.v_depay = elems["v_depay"]
+        logger.info(f"Raw RTSP recording enabled: {self.raw_recording_path}")
 
     def _ensure_application_data_branch(self) -> None:
         """Lazily build application data branch on demand."""

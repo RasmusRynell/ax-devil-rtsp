@@ -1,13 +1,13 @@
-from __future__ import annotations
-
 """
 RTSP Data Retriever Classes
 
 This module provides high-level, process-safe retrievers for video and/or application
-data from RTSP streams, with a focus on Axis cameras. Use the specialized retrievers for
-video-only, application-data-only, or combined retrieval. For Axis-style URLs, use build_axis_rtsp_url.
+data from RTSP streams, with a focus on Axis cameras. Use the specialized
+retrievers for video-only, application-data-only, or combined retrieval. For
+Axis-style URLs, use build_axis_rtsp_url.
 
-All retrievers run the GStreamer client in a subprocess and communicate via a thread-safe queue.
+All retrievers run the GStreamer client in a subprocess and communicate via a
+thread-safe queue.
 
 See Also:
     - build_axis_rtsp_url (in ax_devil_rtsp.utils)
@@ -17,24 +17,31 @@ Note:
     Always call stop() or use the context manager to ensure resources are cleaned up.
 """
 
-from .utils.logging import create_queue_listener, get_logger
-import multiprocessing as mp
-import threading
-import queue as queue_mod
-from typing import Callable, Optional, Dict, Any, TYPE_CHECKING
-from abc import ABC
-import os
-import traceback
+from __future__ import annotations
+
 import logging
 import logging.handlers as log_handlers
+import multiprocessing as mp
+import os
+import queue as queue_mod
+import signal
+import threading
+import traceback
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
+from .recording import (
+    RawRecordingConfig,
+    RecordingPath,
+    coerce_raw_recording_config,
+)
 from .utils.deps import ensure_gi_ready
+from .utils.logging import create_queue_listener, get_logger
 
 # IMPORTANT: Always use 'spawn' start method for multiprocessing to ensure
 # compatibility between parent and GStreamer subprocesses, and to avoid
 # queue breakage or deadlocks. This is required for reliable cross-process
 # communication, especially when using GStreamer and Python >=3.8.
-mp.set_start_method('spawn', force=True)
+mp.set_start_method("spawn", force=True)
 
 RtspPayload = Dict[str, Any]
 if TYPE_CHECKING:
@@ -69,6 +76,7 @@ __all__ = [
     "RtspDataRetriever",
     "RtspVideoDataRetriever",
     "RtspApplicationDataRetriever",
+    "RawRecordingConfig",
 ]
 
 
@@ -83,6 +91,8 @@ def _client_process(
     enable_video: bool,
     enable_application: bool,
     log_queue: mp.Queue | None,
+    raw_recording: RawRecordingConfig | None,
+    graceful_stop_event: Any,
 ):
     """
     Subprocess target: Instantiates CombinedRTSPClient and pushes events to the queue.
@@ -90,7 +100,9 @@ def _client_process(
     """
     import sys
     import time
+
     from .utils.logging import setup_logging
+
     if log_queue is not None:
         setup_logging(
             log_level=log_level,
@@ -101,23 +113,37 @@ def _client_process(
         )
     else:
         setup_logging(log_level=log_level, console=True, log_to_file=False)
-    
+
     current_pid = os.getpid()
     parent_pid = os.getppid()
-    logger.debug(f"Client subprocess started: PID={current_pid}, Parent PID={parent_pid}, URL={rtsp_url}")
-    logger.debug(f"Process config: latency={latency}ms, timeout={connection_timeout}s, video={enable_video}, app_data={enable_application}")
-    
+    logger.debug(
+        "Client subprocess started: "
+        f"PID={current_pid}, Parent PID={parent_pid}, URL={rtsp_url}"
+    )
+    logger.debug(
+        "Process config: "
+        f"latency={latency}ms, timeout={connection_timeout}s, "
+        f"video={enable_video}, app_data={enable_application}"
+    )
+
     client_should_stop = threading.Event()
 
     def parent_monitor_thread():
         """Daemon thread: shuts down client if parent process dies."""
         monitor_thread_id = threading.get_ident()
-        logger.debug(f"Parent monitor thread started: TID={monitor_thread_id}, monitoring parent PID={parent_pid}")
+        logger.debug(
+            "Parent monitor thread started: "
+            f"TID={monitor_thread_id}, monitoring parent PID={parent_pid}"
+        )
         check_count = 0
         while not client_should_stop.is_set():
             current_parent = os.getppid()
             if current_parent != parent_pid:
-                logger.error(f"Parent process changed: original={parent_pid}, current={current_parent}. Shutting down client.")
+                logger.error(
+                    "Parent process changed: "
+                    f"original={parent_pid}, current={current_parent}. "
+                    "Shutting down client."
+                )
                 try:
                     client.stop()
                 except Exception as e:
@@ -126,7 +152,10 @@ def _client_process(
                 sys.exit(0)
             check_count += 1
             if check_count % 10 == 0:  # Log every 10 seconds
-                logger.debug(f"Parent monitor check #{check_count}: parent still alive (PID={parent_pid})")
+                logger.debug(
+                    f"Parent monitor check #{check_count}: "
+                    f"parent still alive (PID={parent_pid})"
+                )
             time.sleep(1)
 
     try:
@@ -149,67 +178,116 @@ def _client_process(
             queue.put({"kind": "session_start", **payload})
 
         def error_cb(payload):
-            logger.debug(f"Subprocess PID={current_pid}: error message - {payload.get('error_type', 'unknown')}")
+            logger.debug(
+                f"Subprocess PID={current_pid}: "
+                f"error message - {payload.get('error_type', 'unknown')}"
+            )
             queue.put({"kind": "error", **payload})
+
         client = CombinedRTSPClient(
             rtsp_url,
             latency=latency,
             video_frame_callback=video_cb if enable_video else None,
-            application_data_callback=application_data_cb if enable_application else None,
+            application_data_callback=application_data_cb
+            if enable_application
+            else None,
             stream_session_metadata_callback=session_cb,
             error_callback=error_cb,
             video_processing_fn=video_processing_fn,
             shared_config=shared_config or {},
             timeout=connection_timeout,
+            raw_recording=raw_recording,
         )
+
+        def shutdown_from_signal(signum, _frame):
+            logger.info(f"Received signal {signum}; stopping RTSP client gracefully")
+            client.stop()
+
+        signal.signal(signal.SIGTERM, shutdown_from_signal)
+        signal.signal(signal.SIGINT, shutdown_from_signal)
+
+        def graceful_stop_monitor_thread():
+            """Daemon thread: handles explicit parent stop requests."""
+            logger.debug("Graceful stop monitor thread started")
+            graceful_stop_event.wait()
+            if client_should_stop.is_set():
+                return
+            logger.info("Graceful stop requested by parent")
+            try:
+                client.stop()
+            except Exception as e:
+                logger.error(f"Exception during graceful client stop: {e}")
+
         monitor = threading.Thread(target=parent_monitor_thread, daemon=True)
         monitor.start()
-        logger.debug(f"Parent monitor thread spawned: daemon=True")
+        logger.debug("Parent monitor thread spawned: daemon=True")
+        stop_monitor = threading.Thread(
+            target=graceful_stop_monitor_thread,
+            daemon=True,
+        )
+        stop_monitor.start()
+        logger.debug("Graceful stop monitor thread spawned: daemon=True")
         try:
             logger.debug(f"Starting CombinedRTSPClient in subprocess PID={current_pid}")
             client.start()
             logger.debug(f"CombinedRTSPClient finished in subprocess PID={current_pid}")
         finally:
-            logger.debug(f"Setting client_should_stop event for subprocess PID={current_pid}")
+            logger.debug(
+                f"Setting client_should_stop event for subprocess PID={current_pid}"
+            )
             client_should_stop.set()
-            logger.debug(f"Waiting for monitor thread to stop...")
+            logger.debug("Waiting for monitor thread to stop...")
     except Exception as exc:
-        logger.error(f"Exception in CombinedRTSPClient subprocess PID={current_pid}: {exc}")
+        logger.error(
+            f"Exception in CombinedRTSPClient subprocess PID={current_pid}: {exc}"
+        )
         logger.debug(f"Full traceback for subprocess PID={current_pid}:", exc_info=True)
         traceback.print_exc()
-        
+
         # Try to get additional system information on crash
         try:
             import psutil
+
             process = psutil.Process(current_pid)
             memory_info = process.memory_info()
-            logger.error(f"Process state at crash - PID={current_pid}, memory={memory_info.rss/(1024*1024):.1f}MB, status={process.status()}")
+            logger.error(
+                "Process state at crash - "
+                f"PID={current_pid}, "
+                f"memory={memory_info.rss / (1024 * 1024):.1f}MB, "
+                f"status={process.status()}"
+            )
         except ImportError:
             logger.debug("psutil not available for enhanced crash reporting")
         except Exception as e:
             logger.debug(f"Could not get process info at crash: {e}")
-        
+
         # Optionally, put an error on the queue so the parent sees it
         if queue:
             try:
-                queue.put({
-                    "kind": "error",
-                    "error_type": "Initialization",
-                    "message": str(exc),
-                    "exception": str(exc),
-                    "traceback": traceback.format_exc(),
-                    "process_pid": current_pid,
-                })
-                logger.debug(f"Error message sent to parent via queue from PID={current_pid}")
+                queue.put(
+                    {
+                        "kind": "error",
+                        "error_type": "Initialization",
+                        "message": str(exc),
+                        "exception": str(exc),
+                        "traceback": traceback.format_exc(),
+                        "process_pid": current_pid,
+                    }
+                )
+                logger.debug(
+                    f"Error message sent to parent via queue from PID={current_pid}"
+                )
             except Exception as queue_err:
                 logger.error(f"Failed to send error to parent queue: {queue_err}")
         logger.debug(f"Subprocess PID={current_pid} exiting with code 1")
         sys.exit(1)
 
 
-class RtspDataRetriever(ABC):
+class RtspDataRetriever:
     """
-    Abstract base class for RTSP data retrievers. Manages process and queue thread lifecycle.
+    Base class for RTSP data retrievers.
+
+    Manages process and queue thread lifecycle.
     Not intended to be instantiated directly.
 
     Parameters
@@ -239,11 +317,18 @@ class RtspDataRetriever(ABC):
     log_level : int, optional
         Logging level used in the subprocess. Defaults to the parent's
         effective logging level.
+    raw_recording : RawRecordingConfig | str | Path, optional
+        Record the original video stream to MP4 in the GStreamer subprocess
+        without re-encoding.
     queue_idle_timeout : float, default=10.0
         Seconds the dispatcher waits without data before considering the
         subprocess idle and exiting the queue loop.
     """
+
     QUEUE_POLL_INTERVAL: float = 0.5  # seconds
+    GRACEFUL_STOP_TIMEOUT: float = 15.0
+    TERMINATE_TIMEOUT: float = 5.0
+    KILL_TIMEOUT: float = 2.0
 
     def __init__(
         self,
@@ -257,16 +342,17 @@ class RtspDataRetriever(ABC):
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
         log_level: Optional[int] = None,
+        raw_recording: RawRecordingConfig | RecordingPath | None = None,
         queue_idle_timeout: float = 10.0,
     ):
-        # Reset internal state to avoid stale references if start() is called after a crash
+        # Reset internal state to avoid stale references after a crash.
         self._proc: Optional[mp.Process] = None
-        # Use a plain mp.Queue() for cross-process communication, as in the working example in gstreamer_data_grabber.py.
-        # This is robust and avoids the pitfalls of Manager().Queue() for high-throughput or large data.
+        # Plain Queue is robust for high-throughput cross-process data.
         self._queue: mp.Queue = mp.Queue()
         logger.debug(f"Created multiprocessing queue for RTSP retriever: {rtsp_url}")
         self._log_queue: mp.Queue | None = None
         self._log_listener: log_handlers.QueueListener | None = None
+        self._graceful_stop_event: Any | None = None
         self._queue_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._rtsp_url = rtsp_url
@@ -278,31 +364,48 @@ class RtspDataRetriever(ABC):
         self._connection_timeout = connection_timeout
         self._on_error = on_error
         self._on_session_start = on_session_start
-        self._log_level = log_level if log_level is not None else logger.getEffectiveLevel()
+        self._log_level = (
+            log_level if log_level is not None else logger.getEffectiveLevel()
+        )
+        self._raw_recording = coerce_raw_recording_config(raw_recording)
         self._last_known_alive = False  # Track process state transitions
         self._queue_idle_timeout = max(queue_idle_timeout, self.QUEUE_POLL_INTERVAL)
-        logger.debug(f"RtspDataRetriever initialized: URL={rtsp_url}, callbacks=(video={on_video_data is not None}, app_data={on_application_data is not None}, error={on_error is not None})")
+        logger.debug(
+            "RtspDataRetriever initialized: "
+            f"URL={rtsp_url}, callbacks=("
+            f"video={on_video_data is not None}, "
+            f"app_data={on_application_data is not None}, "
+            f"error={on_error is not None})"
+        )
 
     def start(self) -> None:
         """
-        Start the retriever. Launches a subprocess for the GStreamer client and a thread to dispatch queue events to callbacks.
+        Start the retriever.
+
+        Launches a subprocess for the GStreamer client and a queue dispatcher.
         Raises RuntimeError if already started.
         """
         if self._proc is not None and self._proc.is_alive():
             raise RuntimeError("Retriever already started.")
-        # Reset internal state to avoid stale references if start() is called after a crash
+        # Reset internal state to avoid stale references after a crash.
         self._proc = None
         self._queue_thread = None
         self._stop_event.clear()
-        
+        if self._raw_recording is not None:
+            self._raw_recording.prepare_output_path()
+
         main_pid = os.getpid()
         logger.info("Starting retriever process...")
-        logger.debug(f"Main process PID={main_pid}, spawning subprocess for URL: {self._rtsp_url}")
+        logger.debug(
+            f"Main process PID={main_pid}, "
+            f"spawning subprocess for URL: {self._rtsp_url}"
+        )
 
         base_logger = get_logger("")
         if not base_logger.handlers:
             # Minimal console logging if the host app has not configured handlers.
             from .utils.logging import setup_logging
+
             setup_logging(log_level=self._log_level, log_to_file=False)
         log_queue_for_child: mp.Queue | None = None
         if base_logger.handlers:
@@ -312,7 +415,9 @@ class RtspDataRetriever(ABC):
                 self._log_listener = create_queue_listener(
                     self._log_queue,
                     handlers=[
-                        h for h in base_logger.handlers if not isinstance(h, log_handlers.QueueHandler)
+                        h
+                        for h in base_logger.handlers
+                        if not isinstance(h, log_handlers.QueueHandler)
                     ],
                 )
                 if self._log_listener:
@@ -320,6 +425,7 @@ class RtspDataRetriever(ABC):
                     log_queue_for_child = self._log_queue
                     logger.debug("Started log queue listener for retriever subprocess")
 
+        self._graceful_stop_event = mp.Event()
         self._proc = mp.Process(
             target=_client_process,
             args=(
@@ -330,59 +436,86 @@ class RtspDataRetriever(ABC):
                 self._shared_config,
                 self._connection_timeout,
                 self._log_level,
-                self._on_video_data is not None or self._video_processing_fn is not None,
+                self._on_video_data is not None
+                or self._video_processing_fn is not None
+                or self._raw_recording is not None,
                 self._on_application_data is not None,
                 log_queue_for_child,
+                self._raw_recording,
+                self._graceful_stop_event,
             ),
         )
         self._proc.start()
-        
+
         subprocess_pid = self._proc.pid
         logger.debug(f"Subprocess spawned successfully: PID={subprocess_pid}")
-        
+
         self._queue_thread = threading.Thread(
-            target=self._queue_dispatch_loop, daemon=True)
+            target=self._queue_dispatch_loop, daemon=True
+        )
         self._queue_thread.start()
-        
+
         queue_thread_id = self._queue_thread.ident
-        logger.debug(f"Queue dispatch thread started: TID={queue_thread_id}, daemon=True")
+        logger.debug(
+            f"Queue dispatch thread started: TID={queue_thread_id}, daemon=True"
+        )
         logger.info("Retriever process started.")
 
     def stop(self) -> None:
         """
-        Stop the retriever. Terminates the subprocess and queue thread. Safe to call multiple times.
+        Stop the retriever.
+
+        Stops the subprocess and queue thread. Safe to call multiple times.
         """
         if self._proc is None:
             logger.debug("Stop called but no process to stop")
             return
-            
+
         subprocess_pid = self._proc.pid if self._proc else "unknown"
         logger.info("Stopping retriever process...")
         logger.debug(f"Stopping subprocess PID={subprocess_pid} and queue thread")
-        
+
         self._stop_event.set()
         logger.debug("Stop event set for queue dispatch thread")
-        
+
         try:
             if self._proc.is_alive():
-                logger.debug(f"Terminating subprocess PID={subprocess_pid}")
-                self._proc.terminate()
-                
-                logger.debug(f"Waiting for subprocess PID={subprocess_pid} to join...")
-                self._proc.join(timeout=5)
-                
+                logger.debug(
+                    f"Requesting graceful stop for subprocess PID={subprocess_pid}"
+                )
+                if self._graceful_stop_event is not None:
+                    self._graceful_stop_event.set()
+
+                logger.debug(
+                    f"Waiting for subprocess PID={subprocess_pid} to stop gracefully..."
+                )
+                self._proc.join(timeout=self.GRACEFUL_STOP_TIMEOUT)
+
                 if self._proc.is_alive():
-                    logger.warning(f"Subprocess PID={subprocess_pid} did not terminate gracefully, killing")
+                    logger.warning(
+                        f"Subprocess PID={subprocess_pid} "
+                        "did not stop gracefully, terminating"
+                    )
+                    self._proc.terminate()
+                    self._proc.join(timeout=self.TERMINATE_TIMEOUT)
+
+                if self._proc.is_alive():
+                    logger.warning(
+                        f"Subprocess PID={subprocess_pid} did not terminate, killing"
+                    )
                     self._proc.kill()
-                    self._proc.join(timeout=2)
-                    
+                    self._proc.join(timeout=self.KILL_TIMEOUT)
+
                 if self._proc.exitcode is not None:
                     exit_info = self._interpret_exit_code(self._proc.exitcode)
                     logger.info(f"Subprocess PID={subprocess_pid} exited: {exit_info}")
-                    
+
                     # Only warn on unexpected/abnormal termination
                     if not self._is_normal_termination(self._proc.exitcode):
-                        logger.warning(f"Subprocess PID={subprocess_pid} terminated unexpectedly: {exit_info}")
+                        logger.warning(
+                            f"Subprocess PID={subprocess_pid} "
+                            f"terminated unexpectedly: {exit_info}"
+                        )
                 else:
                     logger.warning(f"Subprocess PID={subprocess_pid} exit code unknown")
             else:
@@ -390,12 +523,20 @@ class RtspDataRetriever(ABC):
         finally:
             if self._queue_thread is not None and self._queue_thread.is_alive():
                 queue_thread_id = self._queue_thread.ident
-                logger.debug(f"Waiting for queue thread TID={queue_thread_id} to join (timeout=2s)")
+                logger.debug(
+                    f"Waiting for queue thread TID={queue_thread_id} "
+                    "to join (timeout=2s)"
+                )
                 self._queue_thread.join(timeout=2)
                 if self._queue_thread.is_alive():
-                    logger.warning(f"Queue thread TID={queue_thread_id} did not stop within timeout")
+                    logger.warning(
+                        f"Queue thread TID={queue_thread_id} "
+                        "did not stop within timeout"
+                    )
                 else:
-                    logger.debug(f"Queue thread TID={queue_thread_id} stopped successfully")
+                    logger.debug(
+                        f"Queue thread TID={queue_thread_id} stopped successfully"
+                    )
             if self._log_listener is not None:
                 logger.debug("Stopping log queue listener")
                 self._log_listener.stop()
@@ -409,6 +550,7 @@ class RtspDataRetriever(ABC):
 
             logger.debug("Cleaning up process and thread references")
             self._proc = None
+            self._graceful_stop_event = None
             self._queue_thread = None
         logger.info("Retriever process stopped.")
 
@@ -420,71 +562,92 @@ class RtspDataRetriever(ABC):
 
     def _queue_dispatch_loop(self) -> None:
         """
-        Internal: Thread target. Reads from the queue and dispatches to the correct callback.
+        Internal queue dispatch thread target.
+
+        Reads from the queue and dispatches to the correct callback.
         Handles EOFError/OSError gracefully if the parent process is dead.
         Catches and logs exceptions in user callbacks to avoid breaking the loop.
         """
         thread_id = threading.get_ident()
         logger.debug(f"Queue dispatch thread started: TID={thread_id}")
-        
+
         idle_timeout = self._queue_idle_timeout
         max_empty_polls = max(1, int(round(idle_timeout / self.QUEUE_POLL_INTERVAL)))
         consecutive_empty = 0
         total_messages_processed = 0
         message_counts_by_kind = {}
-        
+
         while not self._stop_event.is_set():
             if self._queue is None:
-                logger.debug(f"Queue dispatch loop TID={thread_id}: queue is None, exiting")
+                logger.debug(
+                    f"Queue dispatch loop TID={thread_id}: queue is None, exiting"
+                )
                 break
             try:
                 item = self._queue.get(timeout=self.QUEUE_POLL_INTERVAL)
                 consecutive_empty = 0  # reset on successful read
                 total_messages_processed += 1
-                
+
                 # Track message types for debugging
                 kind = item.get("kind", "unknown")
                 message_counts_by_kind[kind] = message_counts_by_kind.get(kind, 0) + 1
-                
+
                 # Periodic stats logging (less frequent)
                 if total_messages_processed % 500 == 0:
-                    logger.debug(f"Queue processed {total_messages_processed} messages: {message_counts_by_kind}")
-                    
+                    logger.debug(
+                        f"Queue processed {total_messages_processed} messages: "
+                        f"{message_counts_by_kind}"
+                    )
+
             except queue_mod.Empty:
-                # No item ready yet. Keep waiting unless the subprocess has exited or we are stopping.
+                # Keep waiting unless stopping or the subprocess has exited.
                 if self._stop_event.is_set():
-                    logger.debug(f"Queue dispatch loop TID={thread_id}: stop event set, exiting")
+                    logger.debug(
+                        f"Queue dispatch loop TID={thread_id}: stop event set, exiting"
+                    )
                     break
-                # If the subprocess has died or was never started, exit to avoid busy-loop.
+                # Exit if subprocess died or was never started.
                 if self._proc is None or not self._proc.is_alive():
                     subprocess_status = "None" if self._proc is None else "dead"
                     logger.debug(
-                        f"Queue polling ended because retriever subprocess is {subprocess_status} (TID={thread_id}).")
+                        "Queue polling ended because retriever subprocess is "
+                        f"{subprocess_status} (TID={thread_id})."
+                    )
                     break
                 # Otherwise, continue polling.
                 consecutive_empty += 1
                 if consecutive_empty >= max_empty_polls:
                     logger.debug(
-                        f"Queue polling ended due to {consecutive_empty} consecutive empty polls (TID={thread_id}).")
+                        "Queue polling ended due to "
+                        f"{consecutive_empty} consecutive empty polls "
+                        f"(TID={thread_id})."
+                    )
                     break
                 # Log every 20 empty polls to track queue health
                 log_every = max(1, min(20, max_empty_polls))
                 if consecutive_empty % log_every == 0:
-                    logger.debug(f"Queue dispatch TID={thread_id}: {consecutive_empty} consecutive empty polls")
+                    logger.debug(
+                        f"Queue dispatch TID={thread_id}: "
+                        f"{consecutive_empty} consecutive empty polls"
+                    )
                 continue
             except (EOFError, OSError) as e:
                 # Queue broken or closed due to process exit; exit the loop.
                 logger.debug(
-                    f"Queue polling ended due to queue closure or OS error in TID={thread_id}: {e}")
+                    "Queue polling ended due to queue closure or OS error "
+                    f"in TID={thread_id}: {e}"
+                )
                 break
-                
+
             try:
                 if kind == "video" and self._on_video_data:
                     self._on_video_data(item)
                 elif kind == "application_data" and self._on_application_data:
                     self._on_application_data(item)
                 elif kind == "error" and self._on_error:
-                    logger.debug(f"Dispatching error: {item.get('error_type', 'unknown')}")
+                    logger.debug(
+                        f"Dispatching error: {item.get('error_type', 'unknown')}"
+                    )
                     self._on_error(item)
                 elif kind == "session_start" and self._on_session_start:
                     logger.debug("Dispatching session_start callback")
@@ -493,9 +656,16 @@ class RtspDataRetriever(ABC):
                     logger.debug(f"No handler for message kind '{kind}'")
             except Exception as exc:
                 logger.error(
-                    f"Exception in user callback for kind '{kind}' (TID={thread_id}): {exc}", exc_info=True)
-        
-        logger.debug(f"Queue dispatch loop exiting: processed {total_messages_processed} messages, stats: {message_counts_by_kind}")
+                    f"Exception in user callback for kind '{kind}' "
+                    f"(TID={thread_id}): {exc}",
+                    exc_info=True,
+                )
+
+        logger.debug(
+            "Queue dispatch loop exiting: "
+            f"processed {total_messages_processed} messages, "
+            f"stats: {message_counts_by_kind}"
+        )
 
     def __enter__(self) -> "RtspDataRetriever":
         """
@@ -522,13 +692,13 @@ class RtspDataRetriever(ABC):
             sig_num = abs(exit_code)
             # Normal termination signals
             normal_signals = {
-                2,   # SIGINT - Interrupt from keyboard (Ctrl+C)
+                2,  # SIGINT - Interrupt from keyboard (Ctrl+C)
                 15,  # SIGTERM - Normal termination request
             }
             return sig_num in normal_signals
         else:
             return False  # Positive exit codes are application errors
-    
+
     def _interpret_exit_code(self, exit_code: int) -> str:
         """Interpret process exit code and provide detailed information."""
         if exit_code == 0:
@@ -540,7 +710,7 @@ class RtspDataRetriever(ABC):
             sig_num = abs(exit_code)
             signal_name = "UNKNOWN"
             signal_desc = "Unknown signal"
-            
+
             # Common signals that cause process termination
             signal_map = {
                 1: ("SIGHUP", "Hangup detected on controlling terminal"),
@@ -559,12 +729,12 @@ class RtspDataRetriever(ABC):
                 14: ("SIGALRM", "Alarm clock"),
                 15: ("SIGTERM", "Termination signal"),
             }
-            
+
             if sig_num in signal_map:
                 signal_name, signal_desc = signal_map[sig_num]
-            
+
             return f"code={exit_code} (SIGNAL {sig_num}: {signal_name} - {signal_desc})"
-    
+
     @property
     def is_running(self) -> bool:
         """
@@ -573,24 +743,42 @@ class RtspDataRetriever(ABC):
         is_alive = self._proc is not None and self._proc.is_alive()
         if logger.isEnabledFor(logging.DEBUG):
             proc_pid = self._proc.pid if self._proc else "None"
-            thread_alive = self._queue_thread is not None and self._queue_thread.is_alive()
+            thread_alive = (
+                self._queue_thread is not None and self._queue_thread.is_alive()
+            )
             thread_id = self._queue_thread.ident if self._queue_thread else "None"
-            
-            # Include exit code information if process is dead and detect state transitions
+
+            # Include exit code information and detect state transitions.
             exit_info = ""
             if self._proc and not is_alive and self._proc.exitcode is not None:
                 exit_info = f", {self._interpret_exit_code(self._proc.exitcode)}"
                 # Check for unexpected termination
-                if hasattr(self, '_last_known_alive') and self._last_known_alive:
+                if hasattr(self, "_last_known_alive") and self._last_known_alive:
                     if not self._is_normal_termination(self._proc.exitcode):
-                        logger.warning(f"Subprocess PID={proc_pid} terminated unexpectedly: {self._interpret_exit_code(self._proc.exitcode)}")
+                        interpreted_exit = self._interpret_exit_code(
+                            self._proc.exitcode
+                        )
+                        logger.warning(
+                            f"Subprocess PID={proc_pid} "
+                            f"terminated unexpectedly: {interpreted_exit}"
+                        )
                     else:
-                        logger.debug(f"Subprocess PID={proc_pid} terminated normally: {self._interpret_exit_code(self._proc.exitcode)}")
+                        interpreted_exit = self._interpret_exit_code(
+                            self._proc.exitcode
+                        )
+                        logger.debug(
+                            f"Subprocess PID={proc_pid} "
+                            f"terminated normally: {interpreted_exit}"
+                        )
                     self._last_known_alive = False
-            elif is_alive and hasattr(self, '_last_known_alive'):
+            elif is_alive and hasattr(self, "_last_known_alive"):
                 self._last_known_alive = True
-            
-            logger.debug(f"is_running check: subprocess PID={proc_pid} alive={is_alive}{exit_info}, queue thread TID={thread_id} alive={thread_alive}")
+
+            logger.debug(
+                "is_running check: "
+                f"subprocess PID={proc_pid} alive={is_alive}{exit_info}, "
+                f"queue thread TID={thread_id} alive={thread_alive}"
+            )
         return is_alive
 
 
@@ -610,6 +798,7 @@ class RtspVideoDataRetriever(RtspDataRetriever):
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
         log_level: Optional[int] = None,
+        raw_recording: RawRecordingConfig | RecordingPath | None = None,
         queue_idle_timeout: float = 10.0,
     ):
         super().__init__(
@@ -623,6 +812,7 @@ class RtspVideoDataRetriever(RtspDataRetriever):
             shared_config=shared_config,
             connection_timeout=connection_timeout,
             log_level=log_level,
+            raw_recording=raw_recording,
             queue_idle_timeout=queue_idle_timeout,
         )
 
@@ -643,8 +833,15 @@ class RtspApplicationDataRetriever(RtspDataRetriever):
         shared_config: Optional[dict] = None,
         connection_timeout: int = 30,
         log_level: Optional[int] = None,
+        raw_recording: RawRecordingConfig | RecordingPath | None = None,
         queue_idle_timeout: float = 10.0,
     ):
+        if raw_recording is not None:
+            raise ValueError(
+                "Raw recording requires a video stream; use "
+                "RtspDataRetriever or RtspVideoDataRetriever."
+            )
+
         super().__init__(
             rtsp_url=rtsp_url,
             on_video_data=None,
@@ -656,5 +853,6 @@ class RtspApplicationDataRetriever(RtspDataRetriever):
             shared_config=shared_config,
             connection_timeout=connection_timeout,
             log_level=log_level,
+            raw_recording=None,
             queue_idle_timeout=queue_idle_timeout,
         )

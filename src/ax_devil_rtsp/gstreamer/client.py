@@ -9,12 +9,13 @@ from .diagnostics import DiagnosticMixin
 from .callbacks import CallbackHandlerMixin
 from gi.repository import Gst, GLib
 
-import sys
 import threading
 import time
 from typing import Any, Callable, Dict, Optional
 
 import gi
+
+from ax_devil_rtsp.recording import RawRecordingConfig
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GLib", "2.0")
@@ -42,6 +43,7 @@ class CombinedRTSPClient(CallbackHandlerMixin, DiagnosticMixin, PipelineSetupMix
             Dict[str, Any], dict], Any]] = None,
         shared_config: Optional[dict] = None,
         timeout: Optional[float] = None,
+        raw_recording: RawRecordingConfig | None = None,
     ) -> None:
         # Initialize all mixins
         CallbackHandlerMixin.__init__(self)
@@ -56,9 +58,21 @@ class CombinedRTSPClient(CallbackHandlerMixin, DiagnosticMixin, PipelineSetupMix
         self.error_cb = error_callback
         self.video_proc_fn = video_processing_fn
         self.shared_cfg = shared_config or {}
+        self.raw_recording_path = (
+            raw_recording.prepare_output_path() if raw_recording else None
+        )
 
-        self.video_branch_enabled = video_frame_callback is not None or video_processing_fn is not None
+        self.video_branch_enabled = (
+            video_frame_callback is not None
+            or video_processing_fn is not None
+            or raw_recording is not None
+        )
+        self.decoded_video_branch_enabled = (
+            video_frame_callback is not None or video_processing_fn is not None
+        )
         self.application_data_branch_enabled = application_data_callback is not None
+        self._stop_requested = False
+        self._waiting_for_recording_eos = False
 
         # Initialize GStreamer
         Gst.init(None)
@@ -109,11 +123,35 @@ class CombinedRTSPClient(CallbackHandlerMixin, DiagnosticMixin, PipelineSetupMix
     def stop(self) -> None:
         """Stop the GStreamer pipeline and quit the loop."""
         logger.info("Stopping CombinedRTSPClient")
-        
+
+        if self._stop_requested:
+            logger.debug("Stop already requested")
+            return
+        self._stop_requested = True
+
         # Cancel timeout timer if it exists
         if self._timer and self._timer.is_alive():
             self._timer.cancel()
-            
+
+        if self.raw_recording_path is not None:
+            logger.debug("Sending EOS before stopping recording pipeline")
+            self._waiting_for_recording_eos = True
+            if self.pipeline.send_event(Gst.Event.new_eos()):
+                return
+            logger.warning(
+                "Failed to send EOS; stopping recording pipeline immediately"
+            )
+
+        self._finish_stop()
+
+    def _on_eos_message(self) -> None:
+        """Handle EOS from the bus."""
+        logger.info("EOS received")
+        self._waiting_for_recording_eos = False
+        self._finish_stop()
+
+    def _finish_stop(self) -> None:
+        """Set the pipeline to NULL and quit the main loop."""
         logger.debug("Setting pipeline state to NULL")
         state_change_result = self.pipeline.set_state(Gst.State.NULL)
         logger.debug(f"Pipeline state change to NULL result: {state_change_result}")

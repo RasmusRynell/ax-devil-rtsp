@@ -41,8 +41,11 @@ class CallbackHandlerMixin:
     def _on_bus_message(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
         """Handle GStreamer bus messages."""
         if msg.type == Gst.MessageType.EOS:
-            logger.info("EOS received")
-            self.stop()
+            if hasattr(self, "_on_eos_message"):
+                self._on_eos_message()
+            else:
+                logger.info("EOS received")
+                self.stop()
         elif msg.type == Gst.MessageType.ERROR:
             err, dbg = msg.parse_error()
             self._report_error("GStreamer Error", f"{err.message} | {dbg}")

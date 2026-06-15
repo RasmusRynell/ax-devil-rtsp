@@ -3,21 +3,24 @@ from __future__ import annotations
 import queue
 import sys
 import time
+from contextlib import suppress
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import click
 
 from .doctor import doctor_command
+from .recording import RawRecordingConfig
 from .utils import build_axis_rtsp_url
-from .utils.logging import init_app_logging, get_logger
+from .utils.logging import get_logger, init_app_logging
 
 if TYPE_CHECKING:
     import numpy as np
 
 
 def simple_video_processing_example(
-    payload: dict, shared_config: dict,
+    payload: dict,
+    shared_config: dict,
 ) -> "np.ndarray":
     """
     Example video processing hook with a timestamp overlay and brightness adjustment.
@@ -30,8 +33,13 @@ def simple_video_processing_example(
     # Add timestamp overlay
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     cv2.putText(
-        processed, "Local: " +
-        timestamp, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
+        processed,
+        "Local: " + timestamp,
+        (10, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (0, 255, 0),
+        2,
     )
 
     # Apply brightness adjustment if configured
@@ -43,8 +51,7 @@ def simple_video_processing_example(
     shared_config["frame_count"] = shared_config.get("frame_count", 0) + 1
     frame_text = f"Frame: {shared_config['frame_count']}"
     cv2.putText(
-        processed, frame_text, (10,
-                                60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1
+        processed, frame_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1
     )
 
     ntp_time = payload.get("latest_rtp_data", {}).get("human_time")
@@ -85,7 +92,7 @@ def _display_loop(video_frames, args, retriever):
                 cv2.imshow("RTSP Stream", frame_bgr)
 
             # Check for 'q' key to quit
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            if cv2.waitKey(1) & 0xFF == ord("q"):
                 print("User pressed 'q' to quit")
                 break
 
@@ -117,6 +124,17 @@ def main(**kwargs):
     logger = get_logger("cli")
     logger.info(f"Starting with args: {args}")
 
+    raw_recording = None
+    if getattr(args, "record_raw", None):
+        if args.only_application_data:
+            raise click.UsageError(
+                "--record-raw requires video; remove --only-application-data."
+            )
+        raw_recording = RawRecordingConfig.from_path(
+            args.record_raw,
+            overwrite=args.record_overwrite,
+        )
+
     if getattr(args, "rtsp_url", None):
         rtsp_url = args.rtsp_url
     else:
@@ -126,7 +144,9 @@ def main(**kwargs):
                 username=args.device_username,
                 password=args.device_password,
                 video_source=getattr(args, "source", 1),
-                get_video_data=not args.only_application_data,
+                get_video_data=(
+                    not args.only_application_data or raw_recording is not None
+                ),
                 get_application_data=not args.only_video,
                 rtp_ext=getattr(args, "rtp_ext", True),
                 resolution=getattr(args, "resolution", None),
@@ -171,8 +191,7 @@ def main(**kwargs):
         error_type = payload.get("error_type", "Unknown")
         message = payload.get("message", "Unknown error")
         error_count = payload.get("error_count", 0)
-        logger.error(
-            f"[ERROR] {error_type}: {message} (total errors: {error_count})")
+        logger.error(f"[ERROR] {error_type}: {message} (total errors: {error_count})")
 
     # Set up video processing if requested
     video_processing_fn = None
@@ -190,12 +209,19 @@ def main(**kwargs):
 
     retriever_classes = {
         (True, False): (RtspVideoDataRetriever, "video-only retriever"),
-        (False, True): (RtspApplicationDataRetriever, "application data-only retriever"),
-        (False, False): (RtspDataRetriever, "combined video+application data retriever")
+        (False, True): (
+            RtspApplicationDataRetriever,
+            "application data-only retriever",
+        ),
+        (False, False): (
+            RtspDataRetriever,
+            "combined video+application data retriever",
+        ),
     }
 
-    retriever_class, desc = retriever_classes[(
-        args.only_video, args.only_application_data)]
+    retriever_class, desc = retriever_classes[
+        (args.only_video, args.only_application_data)
+    ]
     logger.info(f"Using {retriever_class.__name__} ({desc})")
 
     # Build kwargs based on retriever class signature
@@ -207,6 +233,7 @@ def main(**kwargs):
         "video_processing_fn": video_processing_fn,
         "shared_config": shared_config,
         "connection_timeout": args.connection_timeout,
+        "raw_recording": raw_recording,
     }
 
     # Add class-specific callback arguments
@@ -221,31 +248,34 @@ def main(**kwargs):
     retriever = retriever_class(**kwargs)
 
     try:
-        print(
-            f"Using {'manual lifecycle' if args.manual_lifecycle else 'context manager'}")
+        lifecycle_mode = (
+            "manual lifecycle" if args.manual_lifecycle else "context manager"
+        )
+        print(f"Using {lifecycle_mode}")
 
         if args.manual_lifecycle:
             retriever.start()
             try:
-                print(
-                    "Press Ctrl+C to stop, or 'q' in video window to quit")
+                print("Press Ctrl+C to stop, or 'q' in video window to quit")
                 _display_loop(video_frames, args, retriever)
             finally:
                 retriever.stop()
         else:
             with retriever:
-                print(
-                    "Press Ctrl+C to stop, or 'q' in video window to quit")
+                print("Press Ctrl+C to stop, or 'q' in video window to quit")
                 _display_loop(video_frames, args, retriever)
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     except Exception as e:
         logger.error(f"Error running retriever: {e}")
+        raise click.ClickException(str(e)) from e
     finally:
         logger.info("Cleaning up...")
         if not args.only_application_data:
-            import cv2
-            cv2.destroyAllWindows()
+            with suppress(Exception):
+                import cv2
+
+                cv2.destroyAllWindows()
 
 
 def _shared_options(func):
@@ -264,9 +294,7 @@ def _shared_options(func):
         is_flag=True,
         default=False,
         show_default=True,
-        help=(
-            "Enable only video frames (disable application data)"
-        ),
+        help=("Enable only video frames (disable application data)"),
     )(func)
 
     func = click.option(
@@ -274,9 +302,7 @@ def _shared_options(func):
         is_flag=True,
         default=False,
         show_default=True,
-        help=(
-            "Enable only application data XML (disable video)"
-        ),
+        help=("Enable only application data XML (disable video)"),
     )(func)
 
     func = click.option(
@@ -290,7 +316,10 @@ def _shared_options(func):
     func = click.option(
         "--log-file",
         type=click.Path(path_type=str, dir_okay=False, writable=True),
-        help="Path to the rotating log file (defaults to ~/.ax_devil/logs/ax-devil-rtsp/ax-devil-rtsp.log)",
+        help=(
+            "Path to the rotating log file "
+            "(defaults to ~/.ax_devil/logs/ax-devil-rtsp/ax-devil-rtsp.log)"
+        ),
     )(func)
 
     func = click.option(
@@ -332,6 +361,23 @@ def _shared_options(func):
         default=False,
         show_default=True,
         help="Use manual start()/stop() instead of the context manager",
+    )(func)
+
+    func = click.option(
+        "--record-raw",
+        type=click.Path(path_type=str, dir_okay=False, writable=True),
+        help=(
+            "Record the original H.264 RTSP video stream to an MP4 file "
+            "without overlays or re-encoding."
+        ),
+    )(func)
+
+    func = click.option(
+        "--record-overwrite",
+        is_flag=True,
+        default=False,
+        show_default=True,
+        help="Overwrite --record-raw output if it already exists.",
     )(func)
 
     return func

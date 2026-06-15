@@ -75,6 +75,11 @@ Run `ax-devil-rtsp --help` for the full reference. Common flows:
   ```
 - Adjust the stream: `--resolution 1280x720`, `--source 2`, `--latency 200`
   (only applies when building the URL without `--url`)
+- Record the original video stream without overlays or re-encoding:
+  ```bash
+  ax-devil-rtsp ... --record-raw recording.mp4
+  ```
+  Add `--record-overwrite` to replace an existing output file.
 - Optional helpers: `--enable-video-processing`, `--brightness-adjustment 25`, `--manual-lifecycle`
   (`--url` skips device-specific URL construction)
 - Check host dependencies and workaround status: `ax-devil-rtsp doctor`
@@ -148,6 +153,26 @@ if __name__ == "__main__":
 - `on_session_start` is invoked once per RTP pad; the parsed `media` value distinguishes video vs. application data.
 - Because the package forces the multiprocessing start method to `'spawn'`, keep the
   `if __name__ == "__main__":` guard around your entry point (all platforms).
+
+### Raw video recording
+
+Use `RawRecordingConfig` to save the original H.264 RTSP video stream to MP4 without overlays or re-encoding. Recording runs inside the GStreamer subprocess and does not require a video frame callback.
+
+```python
+import time
+from ax_devil_rtsp import RawRecordingConfig, RtspVideoDataRetriever
+
+
+retriever = RtspVideoDataRetriever(
+  rtsp_url="rtsp://admin:secret@192.168.1.90/axis-media/media.amp",
+  raw_recording=RawRecordingConfig.from_path("recording.mp4"),
+)
+
+with retriever:
+  time.sleep(10)
+```
+
+The output path must end in `.mp4`. Existing files are rejected unless `overwrite=True` is set. On normal shutdown, the GStreamer pipeline sends EOS before stopping so the MP4 file is finalized.
 
 ---
 
