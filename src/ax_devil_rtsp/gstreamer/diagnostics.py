@@ -34,51 +34,97 @@ class DiagnosticMixin:
     def _video_diag(self) -> Dict[str, Any]:
         """Generate video diagnostic information."""
         return {
-            'video_sample_count': self.video_cnt,
-            'time_rtp_probe': self._timers['rtp_probe'],
-            'time_sample': self._timers['vid_sample'],
-            'time_processing': self._timers['vid_proc'],
-            'time_callback': self._timers['vid_cb'],
-            'error_count': self.err_cnt,
-            'uptime': (time.time() - self.start_time) if self.start_time else 0
+            "video_sample_count": self.video_cnt,
+            "time_rtp_probe": self._timers["rtp_probe"],
+            "time_sample": self._timers["vid_sample"],
+            "time_processing": self._timers["vid_proc"],
+            "time_callback": self._timers["vid_cb"],
+            "error_count": self.err_cnt,
+            "uptime": (time.time() - self.start_time) if self.start_time else 0,
         }
 
     def _application_data_diag(self) -> Dict[str, Any]:
         """Generate application data diagnostic information."""
-        return {
-            'application_data_sample_count': self.application_data_cnt,
-            'xml_message_count': self.xml_cnt,
-            'error_count': self.err_cnt,
-            'uptime': (time.time() - self.start_time) if self.start_time else 0
+        diagnostics = {
+            "application_data_sample_count": self.application_data_cnt,
+            "xml_message_count": self.xml_cnt,
+            "error_count": self.err_cnt,
+            "uptime": (time.time() - self.start_time) if self.start_time else 0,
         }
-    
+        self._add_application_rtp_diagnostics(diagnostics)
+        return diagnostics
+
+    def _add_application_rtp_diagnostics(self, diagnostics: Dict[str, Any]) -> None:
+        """Add application RTP state when the callback mixin provides it."""
+        xml_acc = getattr(self, "_xml_acc", None)
+        diagnostics.update(
+            {
+                "application_rtp_sequence_gap_count": getattr(
+                    self, "_application_rtp_sequence_gap_count", 0
+                ),
+                "application_rtp_expected_sequence": getattr(
+                    self, "_application_rtp_expected_sequence", None
+                ),
+                "application_rtp_current_timestamp": getattr(
+                    self, "_application_rtp_current_timestamp", None
+                ),
+                "application_rtp_current_corrupt": getattr(
+                    self, "_application_rtp_current_corrupt", False
+                ),
+                "application_rtp_current_drop_reason": getattr(
+                    self, "_application_rtp_current_drop_reason", None
+                ),
+                "application_xml_dropped_by_rtp_loss_count": getattr(
+                    self, "_application_xml_dropped_by_rtp_loss_count", 0
+                ),
+                "application_xml_dropped_by_timestamp_resync_count": getattr(
+                    self, "_application_xml_dropped_by_timestamp_resync_count", 0
+                ),
+                "application_rtp_last_drop": getattr(
+                    self, "_application_rtp_last_drop", None
+                ),
+                "application_xml_accumulated_bytes": len(xml_acc)
+                if xml_acc is not None
+                else 0,
+            }
+        )
+
     def _get_current_diagnostics(self) -> Dict[str, Any]:
         """Get current diagnostic state for error context."""
         current_time = time.time()
-        return {
-            'video_samples': self.video_cnt,
-            'application_data_samples': self.application_data_cnt,
-            'xml_messages': self.xml_cnt,
-            'error_count': self.err_cnt,
-            'uptime_seconds': (current_time - self.start_time) if self.start_time else 0,
-            'timers': dict(self._timers),
-            'timestamp': current_time,
+        diagnostics = {
+            "video_samples": self.video_cnt,
+            "application_data_samples": self.application_data_cnt,
+            "xml_messages": self.xml_cnt,
+            "error_count": self.err_cnt,
+            "uptime_seconds": (current_time - self.start_time)
+            if self.start_time
+            else 0,
+            "timers": dict(self._timers),
+            "timestamp": current_time,
         }
+        self._add_application_rtp_diagnostics(diagnostics)
+        return diagnostics
 
-    def _report_error(self, error_type: str, message: str, exception: Optional[Exception] = None) -> None:
+    def _report_error(
+        self,
+        error_type: str,
+        message: str,
+        exception: Optional[Exception] = None,
+    ) -> None:
         """Report an error through logging, counting, and callback."""
         self.err_cnt += 1
-        
+
         # Enhanced context collection
         current_time = time.time()
         process_id = os.getpid()
         thread_id = threading.get_ident()
         uptime = (current_time - self.start_time) if self.start_time else 0
-        
+
         # Log with enhanced context (PID/TID now automatic in formatters)
         context_info = f"[uptime={uptime:.2f}s, errors={self.err_cnt}]"
         logger.error(f"{context_info} {error_type}: {message}")
-        
+
         # Include full stack trace in debug mode if exception is provided
         if exception and logger.isEnabledFor(10):  # DEBUG level
             logger.debug(f"Full traceback for {error_type}:", exc_info=True)
@@ -86,23 +132,29 @@ class DiagnosticMixin:
         if self.error_cb:
             # Enhanced error payload with context
             error_payload = {
-                'error_type': error_type,
-                'message': message,
-                'exception': str(exception) if exception else None,
-                'error_count': self.err_cnt,
-                'timestamp': current_time,
-                'uptime': uptime,
-                'process_id': process_id,
-                'thread_id': thread_id,
-                'diagnostics': self._get_current_diagnostics(),
+                "error_type": error_type,
+                "message": message,
+                "exception": str(exception) if exception else None,
+                "error_count": self.err_cnt,
+                "timestamp": current_time,
+                "uptime": uptime,
+                "process_id": process_id,
+                "thread_id": thread_id,
+                "diagnostics": self._get_current_diagnostics(),
             }
-            
+
             # Add full traceback if available
             if exception:
-                error_payload['traceback'] = ''.join(traceback.format_exception(
-                    type(exception), exception, exception.__traceback__
-                )) if exception.__traceback__ else None
-            
+                error_payload["traceback"] = (
+                    "".join(
+                        traceback.format_exception(
+                            type(exception), exception, exception.__traceback__
+                        )
+                    )
+                    if exception.__traceback__
+                    else None
+                )
+
             try:
                 self.error_cb(error_payload)
             except Exception as cb_error:
