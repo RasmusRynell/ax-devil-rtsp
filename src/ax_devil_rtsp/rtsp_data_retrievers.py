@@ -117,13 +117,9 @@ def _client_process(
         while not client_should_stop.is_set():
             current_parent = os.getppid()
             if current_parent != parent_pid:
-                logger.error(f"Parent process changed: original={parent_pid}, current={current_parent}. Shutting down client.")
-                try:
-                    client.stop()
-                except Exception as e:
-                    logger.debug(f"Exception during emergency client stop: {e}")
-                logger.debug(f"Monitor thread exiting after {check_count} checks")
-                sys.exit(0)
+                logger.error(f"Parent process changed: original={parent_pid}, current={current_parent}. Exiting.")
+                # sys.exit() would only end this thread, and client.stop() can deadlock on the unread queue.
+                os._exit(0)
             check_count += 1
             if check_count % 10 == 0:  # Log every 10 seconds
                 logger.debug(f"Parent monitor check #{check_count}: parent still alive (PID={parent_pid})")
