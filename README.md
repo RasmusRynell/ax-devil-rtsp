@@ -16,6 +16,25 @@ See also [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-a
 
 ## Install
 
+This package is the RTSP/GStreamer layer for the ax-devil tools. It is intentionally separate from the desktop app so that core/offline workflows can run without native RTSP dependencies.
+
+### Current platform status
+
+- Linux is the supported runtime today.
+- Windows is not ready yet. The Python package imports can be made installable, but live RTSP still needs a working native GStreamer + GObject Introspection (`gi`) stack for Windows.
+- The current Windows failure is not an Axis or Python API issue. It is the native binding layer: `PyGObject`/`gi` is not available in a normal Windows Python/uv environment, and building it from PyPI can fail because it expects compatible GStreamer/GI libraries and toolchains.
+
+What needs to be fixed for Windows:
+
+- Choose and document a supported Windows GStreamer distribution strategy, most likely MSYS2 or the official GStreamer runtime/development installers.
+- Make `doctor` detect that setup and print Windows-specific guidance instead of Linux package names.
+- Verify the required GStreamer elements and typelibs are available on Windows: `rtspsrc`, `rtph264depay`, `h264parse`, `avdec_h264`, `videoconvert`, `appsink`, `rtpjitterbuffer`, `Gst`, and `GstRtp`.
+- Run an end-to-end RTSP test against an Axis device on Windows.
+
+Until that work is done, use Linux/WSL for live RTSP development.
+
+### Linux system dependencies
+
 On Linux, this package depends on native GStreamer, GI, and Cairo libraries.
 
 ```bash
