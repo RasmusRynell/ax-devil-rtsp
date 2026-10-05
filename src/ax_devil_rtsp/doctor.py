@@ -111,6 +111,11 @@ _PACKAGES: dict[str, tuple[str, dict[str, tuple[str, ...]]]] = {
             "rtsp_server": ("gst-rtsp-server",),
         },
     ),
+    # Windows: the gstreamer-meta wheels bundle GStreamer, plugins and PyGObject.
+    "pip": (
+        "pip install",
+        {key: ("gstreamer-meta",) for key in (*_REQUIRED_KEYS, *_OPTIONAL_KEYS)},
+    ),
 }
 
 
@@ -123,7 +128,9 @@ UBUNTU_PACKAGES = tuple(_packages_for("apt", _REQUIRED_KEYS))
 
 
 def detect_package_manager() -> str | None:
-    """Return "apt" or "pacman" for supported Linux distros, else None."""
+    """Return "apt"/"pacman" on supported Linux distros, "pip" on Windows, else None."""
+    if sys.platform == "win32":
+        return "pip"
     if not sys.platform.startswith("linux"):
         return None
     try:
@@ -172,13 +179,7 @@ def _run_checks() -> tuple[list[DoctorCheck], list[str]]:
     """Run all checks; return them with the requirement keys that failed."""
     checks: list[DoctorCheck] = []
 
-    checks.append(
-        DoctorCheck(
-            "Platform",
-            sys.platform.startswith("linux"),
-            sys.platform,
-        )
-    )
+    checks.append(DoctorCheck("Platform", True, sys.platform))
 
     try:
         from .setup_workarounds import ensure_safe_environment, get_workaround_status
@@ -203,6 +204,9 @@ def _run_checks() -> tuple[list[DoctorCheck], list[str]]:
     # Without GI or GStreamer the later checks cannot run, so everything
     # from that point on is reported as missing.
     try:
+        from .utils.deps import use_gstreamer_wheels
+
+        use_gstreamer_wheels()
         import gi  # type: ignore
 
         checks.append(
@@ -322,7 +326,9 @@ def render_doctor_report() -> int:
         if report.install_command:
             click.echo("Install the missing packages:")
             click.echo(f"  {report.install_command}")
-            if any(c.label == "PyGObject" and not c.ok for c in report.checks):
+            if report.package_manager != "pip" and any(
+                c.label == "PyGObject" and not c.ok for c in report.checks
+            ):
                 click.echo("Then install the Python bindings:")
                 click.echo("  pip install PyGObject")
         elif report.package_manager is None:

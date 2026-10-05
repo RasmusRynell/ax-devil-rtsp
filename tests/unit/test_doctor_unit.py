@@ -49,6 +49,43 @@ def test_detect_package_manager_without_os_release(monkeypatch):
     assert doctor.detect_package_manager() is None
 
 
+def test_detect_package_manager_windows(monkeypatch):
+    monkeypatch.setattr(doctor.sys, "platform", "win32")
+    assert doctor.detect_package_manager() == "pip"
+
+
+def test_install_command_windows_uses_gstreamer_wheels():
+    assert doctor.install_command("pip") == "pip install gstreamer-meta"
+
+
+def test_doctor_text_output_on_windows_skips_pygobject_hint(
+    monkeypatch, checks_result
+):
+    monkeypatch.setattr(doctor.sys, "platform", "win32")
+    checks_result(
+        [doctor.DoctorCheck("PyGObject", False, "No module named gi")],
+        list(doctor._REQUIRED_KEYS),
+    )
+
+    result = CliRunner().invoke(doctor.doctor_command, [])
+
+    assert "pip install gstreamer-meta" in result.output
+    assert "pip install PyGObject" not in result.output
+
+
+def test_platform_check_does_not_fail_report_off_linux(monkeypatch):
+    from ax_devil_rtsp import setup_workarounds
+
+    monkeypatch.setattr(doctor.sys, "platform", "win32")
+    monkeypatch.setattr(setup_workarounds, "ensure_safe_environment", lambda: None)
+    monkeypatch.setattr(setup_workarounds, "get_workaround_status", lambda: {})
+    monkeypatch.setitem(doctor.sys.modules, "gi", None)
+
+    checks, _ = doctor._run_checks()
+
+    assert checks[0] == doctor.DoctorCheck("Platform", True, "win32")
+
+
 def test_install_command_full_and_optional():
     full = doctor.install_command("pacman")
     assert full.startswith("sudo pacman -S --needed ")

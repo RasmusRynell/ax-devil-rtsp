@@ -7,6 +7,27 @@ failures user-friendly and provide actionable messages.
 
 from __future__ import annotations
 
+_gstreamer_wheels_ready = False
+
+
+def use_gstreamer_wheels() -> bool:
+    """Make GStreamer from the pip wheels (``gstreamer-meta``) importable.
+
+    The wheels keep gi, the typelibs and the plugins inside their own packages,
+    so their paths must be added to this process before ``import gi``. Returns
+    False when the wheels are not installed (e.g. Linux system packages).
+    """
+    global _gstreamer_wheels_ready
+    if _gstreamer_wheels_ready:
+        return True
+    try:
+        from gstreamer_libs import setup_python_environment  # type: ignore
+    except ImportError:
+        return False
+    setup_python_environment()
+    _gstreamer_wheels_ready = True
+    return True
+
 
 def ensure_gi_ready() -> None:
     """Ensure PyGObject (gi) and core GStreamer introspection are available.
@@ -17,6 +38,8 @@ def ensure_gi_ready() -> None:
     Raises a RuntimeError with distro-specific installation guidance when the
     GI stack is unavailable or misconfigured.
     """
+    use_gstreamer_wheels()
+
     # Apply workarounds before any gi imports to prevent crashes
     from ..setup_workarounds import ensure_safe_environment
     ensure_safe_environment()

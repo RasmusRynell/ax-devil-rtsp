@@ -61,6 +61,31 @@ jobs:
           USE_REAL_CAMERA=false pytest tests/ -v --maxfail=1 -rs
 
   ###########################################################################
+  # Windows: GStreamer and PyGObject from the gstreamer-meta wheels
+  ###########################################################################
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Check dependencies
+        run: ax-devil-rtsp doctor
+
+      - name: Run unit tests
+        run: pytest tests/unit
+
+  ###########################################################################
   # Build and publish to PyPI on version tags
   ###########################################################################
   build-and-publish:
