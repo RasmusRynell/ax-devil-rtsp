@@ -149,6 +149,21 @@ if __name__ == "__main__":
 - Because the package forces the multiprocessing start method to `'spawn'`, keep the
   `if __name__ == "__main__":` guard around your entry point (all platforms).
 
+### Raw socket metadata client
+
+A minimal RTSP client in plain Python sockets, without GStreamer. It's handy for quick
+tests and as a readable example of the RTSP handshake.
+
+```python
+from ax_devil_rtsp.raw_socket.metadata_raw import SceneMetadataRawClient
+
+client = SceneMetadataRawClient(
+    "rtsp://admin:secret@192.168.1.90/axis-media/media.amp?analytics=polygon&video=0",
+    raw_data_callback=print,  # called with each XML document as a string
+)
+client.start()  # blocks until the stream ends or client.stop() is called
+```
+
 ---
 
 ## Development

@@ -1,4 +1,4 @@
-# Test Strategy for `tests_new`
+# Test Strategy
 
 
 This directory contains tests for the RTSP data retriever system, focusing on meaningful, high-value coverage rather than exhaustive or redundant tests.

@@ -8,7 +8,7 @@ description: 'Use the ax-devil-rtsp package (CLI and Python API) to stream RTSP 
 Python package for streaming RTSP video and AXIS Scene Metadata (application data) from Axis devices. Runs GStreamer in a subprocess and delivers frames/metadata via callbacks.
 
 **Package**: `ax-devil-rtsp` (PyPI)
-**Depends on**: `numpy`, `opencv-python`, `click`, `rich`, `urllib3`, `PyGObject`, GStreamer (system)
+**Depends on**: `numpy`, `opencv-python`, `click`, `PyGObject`, GStreamer (system)
 
 ## Prerequisites — MUST do before any command
 
