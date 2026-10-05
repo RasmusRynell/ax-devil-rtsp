@@ -112,7 +112,7 @@ _PACKAGES: dict[str, tuple[str, dict[str, tuple[str, ...]]]] = {
             "rtsp_server": ("gst-rtsp-server",),
         },
     ),
-    # Windows: the gstreamer-meta wheels bundle GStreamer, plugins and PyGObject.
+    # Windows/macOS: the gstreamer-meta wheels bundle GStreamer and PyGObject.
     "pip": (
         "pip install",
         {key: ("gstreamer-meta",) for key in (*_REQUIRED_KEYS, *_OPTIONAL_KEYS)},
@@ -129,12 +129,14 @@ UBUNTU_PACKAGES = tuple(_packages_for("apt", _REQUIRED_KEYS))
 
 
 def detect_package_manager() -> str | None:
-    """Return "apt"/"pacman" on supported Linux distros, "pip" on Windows, else None.
+    """Return "apt"/"pacman" on supported Linux distros, "pip" on Windows/macOS.
 
     The GStreamer wheels have no build for ARM64 Python on Windows, so there is
     no command there. This asks the interpreter, not the CPU: x64 Python on an
     ARM64 machine can use the wheels.
     """
+    if sys.platform == "darwin":
+        return "pip"
     if sys.platform == "win32":
         return None if sysconfig.get_platform() == "win-arm64" else "pip"
     if not sys.platform.startswith("linux"):

@@ -61,6 +61,11 @@ def test_detect_package_manager_follows_windows_interpreter(
     assert doctor.detect_package_manager() == expected
 
 
+def test_detect_package_manager_uses_wheels_on_macos(monkeypatch):
+    monkeypatch.setattr(doctor.sys, "platform", "darwin")
+    assert doctor.detect_package_manager() == "pip"
+
+
 def test_install_command_windows_uses_gstreamer_wheels():
     assert doctor.install_command("pip") == "pip install gstreamer-meta"
 

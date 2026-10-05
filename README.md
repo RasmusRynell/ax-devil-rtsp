@@ -37,23 +37,23 @@ sudo pacman -S --needed base-devel cairo glib2 libffi pkgconf gstreamer \
   gst-plugins-base-libs gst-plugins-good gst-plugins-bad-libs gst-libav
 ```
 
-On Windows, pip installs everything, including GStreamer and PyGObject from the
-official [GStreamer wheels](https://pypi.org/project/gstreamer-meta/) (64-bit
-or 32-bit CPython 3.10 to 3.14, about 100 MB download):
+On Windows and macOS, pip installs everything, including GStreamer and PyGObject
+from the official [GStreamer wheels](https://pypi.org/project/gstreamer-meta/)
+(CPython 3.10 to 3.14; on Windows 64-bit or 32-bit, about 100 MB download):
 
-```powershell
+```bash
 pip install ax-devil-rtsp
 ```
 
-ARM64 Python is not supported because the wheels have no ARM64 build; on an ARM64
-machine, use x64 Python. When Python starts, the wheels add their GStreamer to
+On Windows, ARM64 Python is not supported because the wheels have no ARM64 build;
+on an ARM64 machine, use x64 Python. When Python starts, the wheels add their GStreamer to
 `PATH`, `PYTHONPATH` and the `GST_*`, `GI_*` and `XDG_*` variables of the process,
 and programs it launches inherit them.
 
 ### Check your setup
 
 `ax-devil-rtsp doctor` checks GStreamer and prints the install command for anything
-missing (apt, pacman, and pip on Windows). Add `--json` for machine-readable output.
+missing (apt, pacman, and pip on Windows/macOS). Add `--json` for machine-readable output.
 
 From Python, for example in another project:
 
