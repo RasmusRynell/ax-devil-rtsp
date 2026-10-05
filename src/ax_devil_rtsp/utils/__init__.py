@@ -72,7 +72,6 @@ def _parse_caps_string(caps_str: str) -> Dict[str, Any]:
     Respects GStreamer’s escape for commas (\\,).
     """
     # Split on commas not preceded by a backslash
-    # negative lookbehind :contentReference[oaicite:1]{index=1}
     parts = re.split(r'(?<!\\),\s*', caps_str)
     result: Dict[str, Any] = {}
     for part in parts:

@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Minimal dependency checks and user guidance for GI/GStreamer.
 
 We avoid importing gi at top-level in other modules to keep import-time
 failures user-friendly and provide actionable messages.
 """
+
+from __future__ import annotations
 
 
 def ensure_gi_ready() -> None:

@@ -179,3 +179,5 @@ scripts/
 
 .cursor/
 logs/
+
+docs/local/*

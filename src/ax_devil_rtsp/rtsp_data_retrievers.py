@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 RTSP Data Retriever Classes
 
@@ -16,6 +14,8 @@ See Also:
 Note:
     Always call stop() or use the context manager to ensure resources are cleaned up.
 """
+
+from __future__ import annotations
 
 from .utils.logging import create_queue_listener, get_logger
 import multiprocessing as mp
@@ -173,7 +173,7 @@ def _client_process(
         logger.error(f"Exception in CombinedRTSPClient subprocess PID={current_pid}: {exc}")
         logger.debug(f"Full traceback for subprocess PID={current_pid}:", exc_info=True)
         traceback.print_exc()
-        
+
         # Try to get additional system information on crash
         try:
             import psutil
@@ -184,7 +184,7 @@ def _client_process(
             logger.debug("psutil not available for enhanced crash reporting")
         except Exception as e:
             logger.debug(f"Could not get process info at crash: {e}")
-        
+
         # Optionally, put an error on the queue so the parent sees it
         if queue:
             try:
@@ -257,8 +257,7 @@ class RtspDataRetriever(ABC):
     ):
         # Reset internal state to avoid stale references if start() is called after a crash
         self._proc: Optional[mp.Process] = None
-        # Use a plain mp.Queue() for cross-process communication, as in the working example in gstreamer_data_grabber.py.
-        # This is robust and avoids the pitfalls of Manager().Queue() for high-throughput or large data.
+        # A plain mp.Queue() avoids the pitfalls of Manager().Queue() for high-throughput or large data.
         self._queue: mp.Queue = mp.Queue()
         logger.debug(f"Created multiprocessing queue for RTSP retriever: {rtsp_url}")
         self._log_queue: mp.Queue | None = None
@@ -577,13 +576,13 @@ class RtspDataRetriever(ABC):
             if self._proc and not is_alive and self._proc.exitcode is not None:
                 exit_info = f", {self._interpret_exit_code(self._proc.exitcode)}"
                 # Check for unexpected termination
-                if hasattr(self, '_last_known_alive') and self._last_known_alive:
+                if self._last_known_alive:
                     if not self._is_normal_termination(self._proc.exitcode):
                         logger.warning(f"Subprocess PID={proc_pid} terminated unexpectedly: {self._interpret_exit_code(self._proc.exitcode)}")
                     else:
                         logger.debug(f"Subprocess PID={proc_pid} terminated normally: {self._interpret_exit_code(self._proc.exitcode)}")
                     self._last_known_alive = False
-            elif is_alive and hasattr(self, '_last_known_alive'):
+            elif is_alive:
                 self._last_known_alive = True
             
             logger.debug(f"is_running check: subprocess PID={proc_pid} alive={is_alive}{exit_info}, queue thread TID={thread_id} alive={thread_alive}")

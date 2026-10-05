@@ -88,7 +88,7 @@ When using `--url`, device-specific options like `--resolution` and `--source` a
 ax-devil-rtsp doctor
 ```
 
-Verifies GStreamer, GI bindings, and other host dependencies. Run this first if streaming fails.
+Verifies GStreamer, GI bindings, and other host dependencies, and prints the apt/pacman command for anything missing. Run this first if streaming fails. `--json` prints the report as JSON; exit code is 1 when a required dependency is missing.
 
 ## Typical CLI Workflows
 

@@ -23,19 +23,35 @@ sudo apt-get update
 sudo apt-get install -y \
   gcc cmake pkg-config python3-dev libcairo2-dev libffi-dev libglib2.0-dev \
   libgirepository-2.0-dev gobject-introspection \
-  python3-gi python3-gst-1.0 \
   gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
   gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+  gstreamer1.0-plugins-bad gstreamer1.0-libav
 
 pip install ax-devil-rtsp
 ```
 
-### System dependencies (Linux)
+On Arch Linux:
 
 ```bash
-# Check your environment after install
-ax-devil-rtsp doctor
+sudo pacman -S --needed base-devel cairo glib2 libffi pkgconf gstreamer \
+  gst-plugins-base-libs gst-plugins-good gst-plugins-bad-libs gst-libav
+```
+
+### Check your setup
+
+`ax-devil-rtsp doctor` checks GStreamer and prints the install command for anything
+missing (apt and pacman). Add `--json` for machine-readable output.
+
+From Python, for example in another project:
+
+```python
+from ax_devil_rtsp import check_environment, install_command
+
+report = check_environment()
+if not report.ok:
+    print(report.install_command)  # only the missing packages
+
+print(install_command())  # full setup command for this OS, None if unsupported
 ```
 
 ---
@@ -148,6 +164,21 @@ if __name__ == "__main__":
 - `on_session_start` is invoked once per RTP pad; the parsed `media` value distinguishes video vs. application data.
 - Because the package forces the multiprocessing start method to `'spawn'`, keep the
   `if __name__ == "__main__":` guard around your entry point (all platforms).
+
+### Raw socket metadata client
+
+A minimal RTSP client in plain Python sockets, without GStreamer. It's handy for quick
+tests and as a readable example of the RTSP handshake.
+
+```python
+from ax_devil_rtsp.raw_socket.metadata_raw import SceneMetadataRawClient
+
+client = SceneMetadataRawClient(
+    "rtsp://admin:secret@192.168.1.90/axis-media/media.amp?analytics=polygon&video=0",
+    raw_data_callback=print,  # called with each XML document as a string
+)
+client.start()  # blocks until the stream ends or client.stop() is called
+```
 
 ---
 
