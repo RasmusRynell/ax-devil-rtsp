@@ -1,7 +1,7 @@
 # ax-devil-rtsp Python API Reference
 
 **Install**: `pip install ax-devil-rtsp` (or `uv pip install ax-devil-rtsp`)
-**System deps**: GStreamer + GI bindings (see `ax-devil-rtsp doctor`)
+**System deps**: GStreamer + GI bindings (see `ax-devil-rtsp doctor`, or `check_environment()` / `install_command()` from Python)
 **Depends on**: `numpy`, `opencv-python`, `click`, `PyGObject`
 
 The Python API does not read environment variables directly. You must pass `ip`, `username`, and `password` explicitly to `build_axis_rtsp_url()`. The CLI falls back to `AX_DEVIL_TARGET_ADDR`, `AX_DEVIL_TARGET_USER`, and `AX_DEVIL_TARGET_PASS` when flags are omitted.

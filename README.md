@@ -23,19 +23,35 @@ sudo apt-get update
 sudo apt-get install -y \
   gcc cmake pkg-config python3-dev libcairo2-dev libffi-dev libglib2.0-dev \
   libgirepository-2.0-dev gobject-introspection \
-  python3-gi python3-gst-1.0 \
   gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
   gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+  gstreamer1.0-plugins-bad gstreamer1.0-libav
 
 pip install ax-devil-rtsp
 ```
 
-### System dependencies (Linux)
+On Arch Linux:
 
 ```bash
-# Check your environment after install
-ax-devil-rtsp doctor
+sudo pacman -S --needed base-devel cairo glib2 libffi pkgconf gstreamer \
+  gst-plugins-base-libs gst-plugins-good gst-plugins-bad-libs gst-libav
+```
+
+### Check your setup
+
+`ax-devil-rtsp doctor` checks GStreamer and prints the install command for anything
+missing (apt and pacman). Add `--json` for machine-readable output.
+
+From Python, for example in another project:
+
+```python
+from ax_devil_rtsp import check_environment, install_command
+
+report = check_environment()
+if not report.ok:
+    print(report.install_command)  # only the missing packages
+
+print(install_command())  # full setup command for this OS, None if unsupported
 ```
 
 ---

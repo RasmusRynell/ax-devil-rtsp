@@ -12,6 +12,7 @@ from .rtsp_data_retrievers import (
     RtspVideoDataRetriever,
     RtspApplicationDataRetriever,
 )
+from .doctor import EnvironmentReport, check_environment, install_command
 from .utils import build_axis_rtsp_url
 from .utils.deps import ensure_gi_ready
 
@@ -28,4 +29,7 @@ __all__ = [
     "RtspApplicationDataRetriever",
     "build_axis_rtsp_url",
     "ensure_gi_ready",
+    "EnvironmentReport",
+    "check_environment",
+    "install_command",
 ]
