@@ -16,7 +16,10 @@ See also [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-a
 
 ## Install
 
-On Linux, this package depends on native GStreamer, GI, and Cairo libraries.
+On Linux, streaming needs native GStreamer, GI, and Cairo libraries (GLib 2.80 or
+newer, e.g. Ubuntu 24.04, Debian 13 or Arch) and the `gstreamer` extra, which builds
+PyGObject against them. Without the extra, the package installs anywhere but cannot
+stream; `ax-devil-rtsp doctor` says what is missing.
 
 ```bash
 sudo apt-get update
@@ -27,7 +30,7 @@ sudo apt-get install -y \
   gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad gstreamer1.0-libav
 
-pip install ax-devil-rtsp
+pip install 'ax-devil-rtsp[gstreamer]'
 ```
 
 On Arch Linux:
@@ -35,11 +38,13 @@ On Arch Linux:
 ```bash
 sudo pacman -S --needed base-devel cairo glib2 libffi pkgconf gstreamer \
   gst-plugins-base-libs gst-plugins-good gst-plugins-bad-libs gst-libav
+
+pip install 'ax-devil-rtsp[gstreamer]'
 ```
 
 On Windows and macOS, pip installs everything, including GStreamer and PyGObject
 from the official [GStreamer wheels](https://pypi.org/project/gstreamer-meta/)
-for CPython 3.10 to 3.14:
+for CPython 3.10 to 3.14. The `gstreamer` extra adds nothing there:
 
 ```bash
 pip install ax-devil-rtsp

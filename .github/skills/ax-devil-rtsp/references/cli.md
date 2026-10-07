@@ -4,7 +4,7 @@ Entry point: `ax-devil-rtsp`.
 
 **Install** (if `which ax-devil-rtsp` returns nothing):
 ```bash
-uv tool install ax-devil-rtsp
+uv tool install 'ax-devil-rtsp[gstreamer]'
 ```
 
 **Check system dependencies**:

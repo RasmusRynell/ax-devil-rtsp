@@ -60,8 +60,9 @@ def ensure_gi_ready() -> None:
             "PyGObject/GStreamer not available or incompatible.\n\n"
             "🔧 Check dependencies:\n"
             "   ax-devil-rtsp doctor\n\n"
-            "Install the required GStreamer/GI system packages from README.md,\n"
-            "then retry.\n\n"
+            "Install the GStreamer/GI system packages that doctor reports.\n"
+            "On Linux, also install the Python bindings:\n"
+            "   pip install 'ax-devil-rtsp[gstreamer]'\n\n"
             f"Original error: {exc}"
         )
         raise RuntimeError(guidance) from exc

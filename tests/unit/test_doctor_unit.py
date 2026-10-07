@@ -82,7 +82,7 @@ def test_doctor_text_output_on_windows_skips_pygobject_hint(
     result = CliRunner().invoke(doctor.doctor_command, [])
 
     assert "pip install gstreamer-meta" in result.output
-    assert "pip install PyGObject" not in result.output
+    assert "ax-devil-rtsp[gstreamer]" not in result.output
 
 
 def test_platform_check_does_not_fail_report_off_linux(monkeypatch):
@@ -206,7 +206,7 @@ def test_doctor_text_output_hints_pygobject_reinstall(os_release, checks_result)
     result = CliRunner().invoke(doctor.doctor_command, [])
 
     assert "sudo pacman -S --needed base-devel" in result.output
-    assert "pip install PyGObject" in result.output
+    assert "pip install 'ax-devil-rtsp[gstreamer]'" in result.output
 
 
 class _GiWithoutGst:
@@ -238,3 +238,18 @@ def test_run_checks_reports_everything_after_an_early_stop(
 
     assert missing == expected_missing
     assert not checks[-1].ok
+
+
+def test_doctor_text_output_hints_bindings_without_package_manager(
+    os_release, checks_result
+):
+    os_release({"ID": "opensuse-tumbleweed"})
+    checks_result(
+        [doctor.DoctorCheck("PyGObject", False, "No module named gi")],
+        list(doctor._REQUIRED_KEYS),
+    )
+
+    result = CliRunner().invoke(doctor.doctor_command, [])
+
+    assert "No install command known for this OS" in result.output
+    assert "pip install 'ax-devil-rtsp[gstreamer]'" in result.output

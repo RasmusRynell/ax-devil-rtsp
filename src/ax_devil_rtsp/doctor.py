@@ -331,24 +331,26 @@ def render_doctor_report() -> int:
 
     if not report.ok:
         click.echo("")
+        # On Linux, PyGObject comes from the gstreamer extra, not the OS packages.
+        bindings_missing = sys.platform.startswith("linux") and any(
+            c.label == "PyGObject" and not c.ok for c in report.checks
+        )
         if report.install_command:
             click.echo("Install the missing packages:")
             click.echo(f"  {report.install_command}")
-            if report.package_manager != "pip" and any(
-                c.label == "PyGObject" and not c.ok for c in report.checks
-            ):
-                click.echo("Then install the Python bindings:")
-                click.echo("  pip install PyGObject")
         elif report.package_manager is None:
             click.echo(
                 "No install command known for this OS. Install GStreamer with the "
                 "elements: " + ", ".join(REQUIRED_ELEMENTS)
             )
-        else:
+        elif not bindings_missing:
             click.echo(
                 "Fix the MISSING items above. "
                 "Python packages: pip install ax-devil-rtsp"
             )
+        if bindings_missing:
+            click.echo("Then install the Python bindings:")
+            click.echo("  pip install 'ax-devil-rtsp[gstreamer]'")
     if report.optional_install_command:
         click.echo("")
         click.echo("Optional, needed to run the test suite:")
