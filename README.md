@@ -17,9 +17,9 @@ See also [ax-devil-device-api](https://github.com/rasmusrynell/ax-devil-device-a
 ## Install
 
 On Linux, streaming needs native GStreamer, GI, and Cairo libraries (GLib 2.80 or
-newer, e.g. Ubuntu 24.04, Debian 13 or Arch) and the `gstreamer` extra, which builds
-PyGObject against them. Without the extra, the package installs anywhere but cannot
-stream; `ax-devil-rtsp doctor` says what is missing.
+newer, e.g. Ubuntu 24.04, Debian 13, Fedora 40 or Arch) and the `gstreamer` extra,
+which builds PyGObject against them. Without the extra, the package installs anywhere
+but cannot stream; `ax-devil-rtsp doctor` says what is missing.
 
 ```bash
 sudo apt-get update
@@ -38,6 +38,20 @@ On Arch Linux:
 ```bash
 sudo pacman -S --needed base-devel cairo glib2 libffi pkgconf gstreamer \
   gst-plugins-base-libs gst-plugins-good gst-plugins-bad-libs gst-libav
+
+pip install 'ax-devil-rtsp[gstreamer]'
+```
+
+On Fedora, the H.264 decoder needs FFmpeg from
+[RPM Fusion](https://rpmfusion.org/Configuration) (enable RPM Fusion Free first):
+
+```bash
+sudo dnf install -y gcc cmake pkgconf-pkg-config python3-devel cairo-devel \
+  cairo-gobject-devel libffi-devel glib2-devel gobject-introspection-devel \
+  gstreamer1 gstreamer1-plugins-base gstreamer1-plugins-good \
+  gstreamer1-plugins-bad-free gstreamer1-plugin-libav
+sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing
+rm -rf ~/.cache/gstreamer-1.0
 
 pip install 'ax-devil-rtsp[gstreamer]'
 ```
@@ -64,7 +78,9 @@ inherit them.
 ### Check your setup
 
 `ax-devil-rtsp doctor` checks GStreamer and prints the install command for anything
-missing (apt, pacman, and pip on Windows/macOS). Add `--json` for machine-readable output.
+missing (apt, pacman, dnf, and pip on Windows/macOS). On Linux without PyGObject it
+checks the system packages without it, so one command installs everything the
+`gstreamer` extra needs. Add `--json` for machine-readable output.
 
 From Python, for example in another project:
 
@@ -74,6 +90,11 @@ from ax_devil_rtsp import check_environment, install_command
 report = check_environment()
 if not report.ok:
     print(report.install_command)  # only the missing packages
+    print(report.hints)  # steps the command cannot express, e.g. RPM Fusion
+if report.bindings_ready:
+    print("System packages are in place; install ax-devil-rtsp[gstreamer]")
+if not report.supported:
+    print("No package can fix this system, e.g. its GLib is too old")
 
 print(install_command())  # full setup command for this OS, None if unsupported
 ```

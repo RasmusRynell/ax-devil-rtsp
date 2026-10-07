@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import ctypes
+import glob
 import json
 import os
 import platform
+import shutil
+import subprocess
 import sys
 import sysconfig
 from dataclasses import asdict, dataclass
@@ -30,6 +34,13 @@ class EnvironmentReport:
     install_command: str | None
     # Command installing missing optional packages (the test-suite RTSP server).
     optional_install_command: str | None
+    # Extra steps the install command cannot express (e.g. third-party repos).
+    hints: tuple[str, ...] = ()
+    # True when only PyGObject is missing and the system can build it: on
+    # Linux, installing the gstreamer extra is the last step.
+    bindings_ready: bool = False
+    # False when no package can make this system stream (GLib too old).
+    supported: bool = True
 
     @property
     def ok(self) -> bool:
@@ -42,6 +53,9 @@ class EnvironmentReport:
             "package_manager": self.package_manager,
             "install_command": self.install_command,
             "optional_install_command": self.optional_install_command,
+            "hints": list(self.hints),
+            "bindings_ready": self.bindings_ready,
+            "supported": self.supported,
         }
 
 
@@ -63,6 +77,15 @@ REQUIRED_ELEMENTS = (
     "appsink",
     "rtpjitterbuffer",
 )
+
+# PyGObject 3.54 (the gstreamer extra) builds against girepository-2.0,
+# which ships with GLib 2.80.
+MIN_GLIB = (2, 80)
+
+GI_NAMESPACES = ("Gst", "GstRtp")
+
+# Reported as missing when no package can fix the system (GLib too old).
+_UNSUPPORTED = "unsupported"
 
 PYTHON_MODULES = (
     ("numpy", "NumPy"),
@@ -112,11 +135,44 @@ _PACKAGES: dict[str, tuple[str, dict[str, tuple[str, ...]]]] = {
             "rtsp_server": ("gst-rtsp-server",),
         },
     ),
+    "dnf": (
+        "sudo dnf install -y",
+        {
+            "pygobject": (
+                "gcc", "cmake", "pkgconf-pkg-config", "python3-devel", "cairo-devel",
+                "cairo-gobject-devel", "libffi-devel", "glib2-devel",
+                "gobject-introspection-devel",
+            ),
+            "gi_namespaces": ("gstreamer1", "gstreamer1-plugins-base"),
+            "gstreamer": ("gstreamer1", "gstreamer1-plugins-base"),
+            "rtspsrc": ("gstreamer1-plugins-good",),
+            "rtph264depay": ("gstreamer1-plugins-good",),
+            "rtpjitterbuffer": ("gstreamer1-plugins-good",),
+            "h264parse": ("gstreamer1-plugins-bad-free",),
+            "avdec_h264": ("gstreamer1-plugin-libav",),
+            "videoconvert": ("gstreamer1-plugins-base",),
+            "appsink": ("gstreamer1-plugins-base",),
+            "rtsp_server": ("gstreamer1-rtsp-server",),
+        },
+    ),
     # Windows/macOS: the gstreamer-meta wheels bundle GStreamer and PyGObject.
     "pip": (
         "pip install",
         {key: ("gstreamer-meta",) for key in (*_REQUIRED_KEYS, *_OPTIONAL_KEYS)},
     ),
+}
+
+
+# package manager -> requirement key -> step the install command cannot express
+_HINTS: dict[str, dict[str, str]] = {
+    "dnf": {
+        # Fedora's FFmpeg has no H.264 decoder; the plugin registry caches that.
+        "avdec_h264": (
+            "avdec_h264 needs FFmpeg from RPM Fusion: enable RPM Fusion Free, then "
+            "sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing && "
+            "rm -rf ~/.cache/gstreamer-1.0"
+        ),
+    },
 }
 
 
@@ -150,6 +206,8 @@ def detect_package_manager() -> str | None:
         return "apt"
     if "arch" in ids:
         return "pacman"
+    if "fedora" in ids:
+        return "dnf"
     return None
 
 
@@ -209,6 +267,14 @@ def _run_checks() -> tuple[list[DoctorCheck], list[str]]:
     except Exception as exc:
         checks.append(DoctorCheck("Workarounds", False, str(exc)))
 
+    for module_name, label in PYTHON_MODULES:
+        try:
+            __import__(module_name)
+        except Exception as exc:
+            checks.append(DoctorCheck(label, False, str(exc)))
+        else:
+            checks.append(DoctorCheck(label, True, "import OK"))
+
     # Without GI or GStreamer the later checks cannot run, so everything
     # from that point on is reported as missing.
     try:
@@ -226,7 +292,12 @@ def _run_checks() -> tuple[list[DoctorCheck], list[str]]:
         )
     except Exception as exc:
         checks.append(DoctorCheck("PyGObject", False, str(exc)))
-        return checks, list(_REQUIRED_KEYS)
+        if not sys.platform.startswith("linux"):
+            return checks, list(_REQUIRED_KEYS)
+        # On Linux, PyGObject is the gstreamer extra; check what it needs
+        # without gi so the user installs every system package in one go.
+        native_checks, missing = _native_checks()
+        return checks + native_checks, missing
 
     try:
         gi.require_version("Gst", "1.0")
@@ -277,15 +348,125 @@ def _run_checks() -> tuple[list[DoctorCheck], list[str]]:
         )
     )
 
-    for module_name, label in PYTHON_MODULES:
-        try:
-            __import__(module_name)
-        except Exception as exc:
-            checks.append(DoctorCheck(label, False, str(exc)))
-        else:
-            checks.append(DoctorCheck(label, True, "import OK"))
-
     return checks, missing
+
+
+def _glib_version() -> tuple[int, ...] | None:
+    """Return the runtime GLib version, read from the library without gi."""
+    try:
+        lib = ctypes.CDLL("libglib-2.0.so.0")
+        return tuple(
+            ctypes.c_uint.in_dll(lib, f"glib_{part}_version").value
+            for part in ("major", "minor", "micro")
+        )
+    except (OSError, ValueError):
+        return None
+
+
+def _missing_build_tools() -> list[str]:
+    """Return what pip lacks to build PyGObject for this interpreter."""
+    missing = [] if shutil.which("cc") or shutil.which("gcc") else ["C compiler"]
+    include = sysconfig.get_paths()["include"]
+    if not os.path.isfile(os.path.join(include, "Python.h")):
+        version = ".".join(str(part) for part in sys.version_info[:2])
+        missing.append(f"Python {version} headers ({include})")
+    if not shutil.which("pkg-config"):
+        return [*missing, "pkg-config"]
+    # cmake is in the install command for pip's build but not needed to detect.
+    for module in ("girepository-2.0", "cairo", "cairo-gobject", "libffi"):
+        found = subprocess.run(
+            ["pkg-config", "--exists", module], capture_output=True, timeout=30
+        )
+        if found.returncode != 0:
+            missing.append(module)
+    return missing
+
+
+def _gst_inspect(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["gst-inspect-1.0", *args], capture_output=True, text=True, timeout=60
+    )
+
+
+def _typelib_found(namespace: str) -> bool:
+    paths = [p for p in os.environ.get("GI_TYPELIB_PATH", "").split(os.pathsep) if p]
+    paths += glob.glob("/usr/lib*/girepository-1.0")
+    paths += glob.glob("/usr/lib/*/girepository-1.0")
+    paths += glob.glob("/usr/local/lib*/girepository-1.0")
+    typelib = f"{namespace}-1.0.typelib"
+    return any(os.path.isfile(os.path.join(path, typelib)) for path in paths)
+
+
+def _native_checks() -> tuple[list[DoctorCheck], list[str]]:
+    """Check the system packages PyGObject and streaming need, without gi."""
+    checks: list[DoctorCheck] = []
+    missing: list[str] = []
+    minimum = ".".join(str(part) for part in MIN_GLIB)
+
+    glib = _glib_version()
+    if glib is None:
+        checks.append(DoctorCheck("GLib", False, "libglib-2.0 not found"))
+        missing.append("pygobject")
+    elif glib[:2] < MIN_GLIB:
+        # No package installs a newer GLib, so no install step can help.
+        found = ".".join(str(part) for part in glib)
+        checks.append(
+            DoctorCheck(
+                "GLib",
+                False,
+                f"{found} is too old; streaming on Linux needs GLib {minimum}+ "
+                "(e.g. Ubuntu 24.04, Debian 13, Fedora 40 or newer)",
+            )
+        )
+        return checks, [_UNSUPPORTED]
+    else:
+        checks.append(DoctorCheck("GLib", True, ".".join(str(p) for p in glib)))
+        build_missing = _missing_build_tools()
+        checks.append(
+            DoctorCheck(
+                "PyGObject build",
+                not build_missing,
+                ", ".join(build_missing) if build_missing else "ready",
+            )
+        )
+        if build_missing:
+            missing.append("pygobject")
+
+    namespaces_missing = [ns for ns in GI_NAMESPACES if not _typelib_found(ns)]
+    checks.append(
+        DoctorCheck(
+            "GI namespaces",
+            not namespaces_missing,
+            ", ".join(namespaces_missing)
+            if namespaces_missing
+            else ", ".join(GI_NAMESPACES),
+        )
+    )
+    if namespaces_missing:
+        missing.append("gi_namespaces")
+
+    try:
+        version = _gst_inspect("--version").stdout.splitlines()[0]
+        missing_elements = [
+            element
+            for element in REQUIRED_ELEMENTS
+            if _gst_inspect("--exists", element).returncode != 0
+        ]
+    except (OSError, subprocess.SubprocessError, IndexError) as exc:
+        checks.append(DoctorCheck("GStreamer", False, f"gst-inspect-1.0: {exc}"))
+        return checks, missing + ["gstreamer", *REQUIRED_ELEMENTS]
+    checks.append(DoctorCheck("GStreamer", True, version))
+
+    checks.append(
+        DoctorCheck(
+            "Required plugins",
+            not missing_elements,
+            ", ".join(missing_elements)
+            if missing_elements
+            else "all required elements found",
+        )
+    )
+    return checks, missing + missing_elements
 
 
 def check_environment() -> EnvironmentReport:
@@ -297,6 +478,8 @@ def check_environment() -> EnvironmentReport:
     """
     checks, missing = _run_checks()
     package_manager = detect_package_manager()
+    hints = _HINTS.get(package_manager or "", {})
+    failed = {check.label for check in checks if check.required and not check.ok}
     return EnvironmentReport(
         checks=tuple(checks),
         package_manager=package_manager,
@@ -306,6 +489,11 @@ def check_environment() -> EnvironmentReport:
         optional_install_command=_install_command(
             package_manager, [key for key in missing if key in _OPTIONAL_KEYS]
         ),
+        hints=tuple(hints[key] for key in dict.fromkeys(missing) if key in hints),
+        # Off Linux, a missing gi also means every system package is missing.
+        bindings_ready=failed == {"PyGObject"}
+        and not any(key in _REQUIRED_KEYS for key in missing),
+        supported=_UNSUPPORTED not in missing,
     )
 
 
@@ -335,21 +523,37 @@ def render_doctor_report() -> int:
         bindings_missing = sys.platform.startswith("linux") and any(
             c.label == "PyGObject" and not c.ok for c in report.checks
         )
-        if report.install_command:
+        system_gaps = [
+            f"{c.label} ({c.detail})"
+            for c in report.checks
+            if c.required and not c.ok and c.label != "PyGObject"
+        ]
+        bindings_step: str | None = "Then install the Python bindings:"
+        if not report.supported:
+            bindings_step = None
+            click.echo("This system cannot stream; see the MISSING items above.")
+        elif report.install_command:
             click.echo("Install the missing packages:")
             click.echo(f"  {report.install_command}")
+            for hint in report.hints:
+                click.echo(f"  {hint}")
+        elif report.bindings_ready:
+            bindings_step = "Install the Python bindings:"
         elif report.package_manager is None:
+            needs = system_gaps or [
+                f"GStreamer with the elements {', '.join(REQUIRED_ELEMENTS)}"
+            ]
             click.echo(
-                "No install command known for this OS. Install GStreamer with the "
-                "elements: " + ", ".join(REQUIRED_ELEMENTS)
+                f"No install command known for this OS. Install: {'; '.join(needs)}"
             )
-        elif not bindings_missing:
+        else:
+            bindings_step = None
             click.echo(
                 "Fix the MISSING items above. "
                 "Python packages: pip install ax-devil-rtsp"
             )
-        if bindings_missing:
-            click.echo("Then install the Python bindings:")
+        if bindings_missing and bindings_step:
+            click.echo(bindings_step)
             click.echo("  pip install 'ax-devil-rtsp[gstreamer]'")
     if report.optional_install_command:
         click.echo("")
