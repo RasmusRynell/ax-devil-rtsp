@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import sys
+import sysconfig
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
@@ -128,9 +129,14 @@ UBUNTU_PACKAGES = tuple(_packages_for("apt", _REQUIRED_KEYS))
 
 
 def detect_package_manager() -> str | None:
-    """Return "apt"/"pacman" on supported Linux distros, "pip" on Windows, else None."""
+    """Return "apt"/"pacman" on supported Linux distros, "pip" on Windows, else None.
+
+    The GStreamer wheels have no build for ARM64 Python on Windows, so there is
+    no command there. This asks the interpreter, not the CPU: x64 Python on an
+    ARM64 machine can use the wheels.
+    """
     if sys.platform == "win32":
-        return "pip"
+        return None if sysconfig.get_platform() == "win-arm64" else "pip"
     if not sys.platform.startswith("linux"):
         return None
     try:

@@ -39,11 +39,16 @@ sudo pacman -S --needed base-devel cairo glib2 libffi pkgconf gstreamer \
 
 On Windows, pip installs everything, including GStreamer and PyGObject from the
 official [GStreamer wheels](https://pypi.org/project/gstreamer-meta/) (64-bit
-or 32-bit CPython 3.10+ from python.org):
+or 32-bit CPython 3.10 to 3.14, about 100 MB download):
 
 ```powershell
 pip install ax-devil-rtsp
 ```
+
+ARM64 Python is not supported because the wheels have no ARM64 build; on an ARM64
+machine, use x64 Python. When Python starts, the wheels add their GStreamer to
+`PATH`, `PYTHONPATH` and the `GST_*`, `GI_*` and `XDG_*` variables of the process,
+and programs it launches inherit them.
 
 ### Check your setup
 

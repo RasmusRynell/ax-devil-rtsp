@@ -49,9 +49,16 @@ def test_detect_package_manager_without_os_release(monkeypatch):
     assert doctor.detect_package_manager() is None
 
 
-def test_detect_package_manager_windows(monkeypatch):
+@pytest.mark.parametrize(
+    "interpreter_platform, expected",
+    [("win-amd64", "pip"), ("win32", "pip"), ("win-arm64", None)],
+)
+def test_detect_package_manager_follows_windows_interpreter(
+    monkeypatch, interpreter_platform, expected
+):
     monkeypatch.setattr(doctor.sys, "platform", "win32")
-    assert doctor.detect_package_manager() == "pip"
+    monkeypatch.setattr(doctor.sysconfig, "get_platform", lambda: interpreter_platform)
+    assert doctor.detect_package_manager() == expected
 
 
 def test_install_command_windows_uses_gstreamer_wheels():

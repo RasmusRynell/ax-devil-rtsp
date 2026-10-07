@@ -13,9 +13,11 @@ _gstreamer_wheels_ready = False
 def use_gstreamer_wheels() -> bool:
     """Make GStreamer from the pip wheels (``gstreamer-meta``) importable.
 
-    The wheels keep gi, the typelibs and the plugins inside their own packages,
-    so their paths must be added to this process before ``import gi``. Returns
-    False when the wheels are not installed (e.g. Linux system packages).
+    The wheels keep gi, the typelibs and the plugins inside their own packages.
+    Their ``.pth`` file normally adds those paths at interpreter startup; this is
+    the fallback for when it did not run (``python -S``, embedded or frozen
+    interpreters). Call it before ``import gi``. Returns False when the wheels
+    are not installed (e.g. Linux system packages).
     """
     global _gstreamer_wheels_ready
     if _gstreamer_wheels_ready:
