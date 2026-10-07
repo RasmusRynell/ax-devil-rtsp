@@ -129,7 +129,7 @@ UBUNTU_PACKAGES = tuple(_packages_for("apt", _REQUIRED_KEYS))
 
 
 def detect_package_manager() -> str | None:
-    """Return "apt"/"pacman" on supported Linux distros, "pip" on Windows/macOS.
+    """Return "apt"/"pacman" on known Linux distros, "pip" on Windows/macOS, else None.
 
     The GStreamer wheels have no build for ARM64 Python on Windows, so there is
     no command there. This asks the interpreter, not the CPU: x64 Python on an
