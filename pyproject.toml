@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ax-devil-rtsp"
 dynamic = ["version"]
-description = "Python library for RTSP streaming from Axis devices"
+description = "Receive RTSP video and Axis scene metadata from Axis cameras"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -13,18 +13,19 @@ authors = [
     {name = "Rasmus Rynell", email = "Rynell.Rasmus@gmail.com"},
 ]
 dependencies = [
-    "numpy>=1.20.0",
-    "opencv-python>=4.5.0",
+    "av>=17",
+    "numpy>=1.23",
     "click>=8.0.0",
-    "PyGObject==3.54.3; sys_platform == 'linux'",
 ]
 
 [project.optional-dependencies]
+display = [
+    "opencv-python>=4.5.0",
+]
 dev = [
     "pytest>=7.0",
-    "pytest-cov",
-    "black",
     "ruff",
+    "mypy",
 ]
 
 [project.urls]
@@ -38,16 +39,7 @@ ax-devil-rtsp = "ax_devil_rtsp.cli:cli"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = ["test_*.py"]
-addopts = "-v --tb=short"
-markers = [
-    "requires_hardware: marks tests that require physical hardware",
-    "requires_gstreamer: marks tests that need GStreamer installation",
-]
-filterwarnings = [
-    "ignore:.*g_object_get_is_valid_property.*:UserWarning",
-    "ignore:.*has no property named.*:UserWarning",
-]
+addopts = "--tb=short"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -59,12 +51,22 @@ version = {attr = "ax_devil_rtsp.__version__"}
 where = ["src"]
 include = ["ax_devil_rtsp*"]
 
-[tool.black]
-line-length = 88
-target-version = ["py310"]
+[tool.setuptools.package-data]
+ax_devil_rtsp = ["py.typed"]
 
 [tool.ruff]
-line-length = 88
+line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "B", "I"]
+
+[tool.ruff.lint.isort]
+known-local-folder = ["fake_camera"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["cv2"]
+ignore_missing_imports = true

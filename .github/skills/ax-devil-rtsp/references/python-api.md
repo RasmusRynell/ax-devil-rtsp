@@ -1,202 +1,161 @@
-# ax-devil-rtsp Python API Reference
+# Python API Reference
 
-**Install**: `pip install ax-devil-rtsp` (or `uv pip install ax-devil-rtsp`)
-**System deps**: GStreamer + GI bindings (see `ax-devil-rtsp doctor`, or `check_environment()` / `install_command()` from Python)
-**Depends on**: `numpy`, `opencv-python`, `click`, `PyGObject`
+```python
+from ax_devil_rtsp import (
+    SceneMetadata,  # one scene metadata XML document
+    StartCancelledError,  # stop() was called before the session was ready
+    StreamConfig,  # what a session receives
+    StreamError,  # credential-safe connection/protocol failure
+    StreamSession,  # one RTSP connection
+    VideoOutput,  # what each video frame is delivered as
+    VideoSample,  # one video frame or access unit
+    build_axis_rtsp_url,  # Axis URL from host, credentials and a StreamConfig
+)
+```
 
-The Python API does not read environment variables directly. You must pass `ip`, `username`, and `password` explicitly to `build_axis_rtsp_url()`. The CLI falls back to `AX_DEVIL_TARGET_ADDR`, `AX_DEVIL_TARGET_USER`, and `AX_DEVIL_TARGET_PASS` when flags are omitted.
+## StreamConfig
 
-Public exports from `ax_devil_rtsp`:
+```python
+StreamConfig(
+    video: VideoOutput | None = VideoOutput.RGB24,  # None: no video
+    metadata: bool = False,
+    hwaccel: str | None = None,   # FFmpeg device type, e.g. "vaapi", "cuda"; see `ax-devil-rtsp doctor`
+    timeout: float = 15.0,        # seconds to become ready, and without data before failing
+)
+```
 
-- `RtspDataRetriever` — Combined video + application data retriever
-- `RtspVideoDataRetriever` — Video-only retriever
-- `RtspApplicationDataRetriever` — Application data (metadata) only retriever
-- `build_axis_rtsp_url()` — Build RTSP URL from device parameters
-- Callback type aliases: `VideoDataCallback`, `ApplicationDataCallback`, `ErrorCallback`, `SessionStartCallback`
-- `RtspPayload` — Type alias: `Dict[str, Any]`
-- `ensure_gi_ready()` — Verify GStreamer/GI bindings are available (raises on failure)
+At least one of `video` and `metadata` must be requested.
+
+| `VideoOutput` | `VideoSample.data` |
+|---|---|
+| `ENCODED` | Annex-B H.264/H.265 `bytes` (first one starts with the SDP parameter sets) |
+| `DECODED` | `av.VideoFrame`, decoder's native pixel format |
+| `RGB24`, `BGR24` | `uint8` array `(height, width, 3)` |
+| `RGBA`, `BGRA` | `uint8` array `(height, width, 4)` |
+| `GRAY` | `uint8` array `(height, width)` |
+
+## StreamSession
+
+```python
+StreamSession(
+    url: str,
+    config: StreamConfig,
+    *,
+    on_video: Callable[[VideoSample], None] | None = None,      # exactly when config.video is set
+    on_metadata: Callable[[SceneMetadata], None] | None = None, # exactly when config.metadata is True
+    on_failure: Callable[[BaseException], None] | None = None,  # once, if it fails after start() returned
+)
+```
+
+| Member | Meaning |
+|---|---|
+| `start()` | Connects; returns when PLAY succeeded. Raises `StreamError` or `StartCancelledError`. One-shot |
+| `stop()` | Non-blocking, idempotent, safe in callbacks |
+| `join(timeout=None)` | Wait for the session to end; not from a callback |
+| `with session:` | `start()`, then `stop()` and `join()` on exit |
+| `is_running` | Receive thread alive |
+| `failure` | `None`, a `StreamError`, or the exception a callback raised |
+| `video_codec` | `"h264"` or `"hevc"` after `start()`, else `None` |
+| `name` | The URL without credentials |
+
+Callbacks run on the session's own receive thread, one at a time, in stream order. No queue sits in between: a slow
+callback slows its own session only. Delivered objects belong to the receiver.
+
+## VideoSample and SceneMetadata
+
+```python
+VideoSample.data  # see VideoOutput; generic: VideoSample[NDArray[np.uint8]], VideoSample[bytes], ...
+VideoSample.rtp_timestamp  # 90 kHz RTP timestamp
+VideoSample.capture_time_ns  # Axis capture time, Unix ns, or None
+VideoSample.keyframe  # bool
+
+SceneMetadata.xml  # str, one complete document
+SceneMetadata.rtp_timestamp
+SceneMetadata.capture_time_ns  # Unix ns or None
+SceneMetadata.utc_time_ns  # first UtcTime in the XML as Unix ns, or None
+```
 
 ## build_axis_rtsp_url
 
-Constructs an RTSP URL for Axis cameras.
-
 ```python
-from ax_devil_rtsp import build_axis_rtsp_url
-
-url = build_axis_rtsp_url(
-    ip="<device-ip>",              # Required
-    username="<user>",             # Required
-    password="<pass>",             # Required
-    video_source=1,                # Required: camera head index
-    get_video_data=True,           # Required: include video stream
-    get_application_data=True,     # Required: include metadata stream
-    rtp_ext=True,                  # Enable RTP extension (NTP timestamps)
-    resolution="640x480",          # Optional: None lets device decide
-)
-# Returns: "rtsp://user:pass@ip/axis-media/media.amp?analytics=polygon&camera=1&..."
+build_axis_rtsp_url(
+    host: str,
+    config: StreamConfig,       # chooses video=0 / analytics=polygon
+    *,
+    username: str = "",
+    password: str = "",         # percent-encoded into the URL
+    port: int | None = None,
+    camera: int | str = 1,
+    resolution: str | None = None,   # e.g. "1280x720"
+    capture_time: bool = True,       # onvifreplayext=1, needed for capture_time_ns
+) -> str
 ```
 
-- At least one of `get_video_data` or `get_application_data` must be True.
-- When `get_video_data=False`, video and audio are disabled in the URL.
-- `resolution` only applies when `get_video_data=True`.
+## Examples
 
-## Callback Signatures
-
-```python
-# Video data callback
-def on_video_data(payload: dict) -> None:
-    frame = payload["data"]  # numpy.ndarray, RGB format, shape (H, W, 3)
-    # payload may also contain "latest_rtp_data" with NTP timestamp info
-
-# Application data callback
-def on_application_data(payload: dict) -> None:
-    xml_bytes = payload["data"]       # bytes: ONVIF Scene Metadata XML
-    diagnostics = payload["diagnostics"]  # dict with timing/stats
-
-# Session start callback (fires once per RTP pad — typically video + app data)
-def on_session_start(payload: dict) -> None:
-    media = payload.get("caps_parsed", {}).get("media") \
-         or payload.get("structure_parsed", {}).get("media")
-    # media is "video" or "application"
-    stream_name = payload["stream_name"]
-
-# Error callback
-def on_error(payload: dict) -> None:
-    error_type = payload["error_type"]   # str
-    message = payload["message"]         # str
-```
-
-## RtspDataRetriever
-
-Combined video + application data retriever. Runs GStreamer in a subprocess.
-
-```python
-from ax_devil_rtsp import RtspDataRetriever, build_axis_rtsp_url
-
-url = build_axis_rtsp_url(
-    ip="<device-ip>", username="<user>", password="<pass>",
-    video_source=1, get_video_data=True, get_application_data=True, rtp_ext=True,
-)
-
-retriever = RtspDataRetriever(
-    rtsp_url=url,                           # Required
-    on_video_data=on_video_data,            # Optional callback
-    on_application_data=on_application_data,# Optional callback
-    on_error=on_error,                      # Optional callback
-    on_session_start=on_session_start,      # Optional callback
-    latency=200,                            # GStreamer latency in ms (default: 200)
-    video_processing_fn=None,               # Optional: process frames in GStreamer process
-    shared_config=None,                     # Optional: dict shared with video_processing_fn
-    connection_timeout=30,                  # Seconds (default: 30)
-    log_level=None,                         # Optional: logging level for subprocess
-    queue_idle_timeout=10.0,                # Seconds idle before exiting (default: 10)
-)
-
-# Context manager (recommended)
-with retriever:
-    while retriever.is_running:
-        time.sleep(0.1)
-
-# Or manual lifecycle
-retriever.start()
-# ... do work ...
-retriever.stop()
-```
-
-Key behaviors:
-- GStreamer runs in a **spawned subprocess**. The package forces `mp.set_start_method('spawn')`.
-- **ALWAYS** use `if __name__ == "__main__":` guard. Call `freeze_support()` for Windows compatibility.
-- The Python API default latency is `200` ms (the CLI default is `100` ms).
-- `start()` raises `RuntimeError` if already started.
-- `stop()` terminates the subprocess and cleans up.
-- `is_running` property checks if the subprocess is alive.
-- Callbacks fire on a dispatcher thread in the main process (not the subprocess).
-
-## RtspVideoDataRetriever
-
-Video-only retriever. Same interface as `RtspDataRetriever` but without `on_application_data`.
-
-```python
-from ax_devil_rtsp import RtspVideoDataRetriever
-
-retriever = RtspVideoDataRetriever(
-    rtsp_url=url,
-    on_video_data=on_video_data,
-    on_error=on_error,
-    on_session_start=on_session_start,
-    latency=200,
-    connection_timeout=30,
-)
-```
-
-## RtspApplicationDataRetriever
-
-Application data (metadata) only. Same interface but without `on_video_data`.
-
-```python
-from ax_devil_rtsp import RtspApplicationDataRetriever
-
-retriever = RtspApplicationDataRetriever(
-    rtsp_url=url,
-    on_application_data=on_application_data,
-    on_error=on_error,
-    on_session_start=on_session_start,
-    latency=200,
-    connection_timeout=30,
-)
-```
-
-## Typical Python Workflows
-
-### Stream video and metadata with callbacks
+### NumPy frames and metadata
 
 ```python
 import time
-from multiprocessing import freeze_support
-from ax_devil_rtsp import RtspDataRetriever, build_axis_rtsp_url
+from ax_devil_rtsp import StreamConfig, StreamSession, VideoOutput, build_axis_rtsp_url
 
-def on_video_data(payload):
-    frame = payload["data"]
-    print(f"Video frame: {frame.shape}")
+config = StreamConfig(video=VideoOutput.BGR24, metadata=True)
+url = build_axis_rtsp_url("192.168.1.90", config, username="root", password="secret")
 
-def on_application_data(payload):
-    print(f"Application data: {len(payload['data'])} bytes")
-
-def on_error(payload):
-    print(f"Error: {payload['message']}")
-
-def main():
-    url = build_axis_rtsp_url(
-        ip="<device-ip>", username="<user>", password="<pass>",
-        video_source=1, get_video_data=True, get_application_data=True, rtp_ext=True,
-    )
-    with RtspDataRetriever(rtsp_url=url, on_video_data=on_video_data,
-                           on_application_data=on_application_data, on_error=on_error) as r:
-        while r.is_running:
-            time.sleep(0.1)
-
-if __name__ == "__main__":
-    freeze_support()
-    main()
+with StreamSession(
+    url,
+    config,
+    on_video=lambda sample: print(sample.data.shape, sample.capture_time_ns),
+    on_metadata=lambda document: print(document.utc_time_ns, len(document.xml)),
+) as session:
+    time.sleep(10)
 ```
 
-### Collect only scene metadata (no video)
+### Latest frame for a GUI thread (drop, don't queue)
 
 ```python
-from ax_devil_rtsp import RtspApplicationDataRetriever, build_axis_rtsp_url
+import threading
 
-url = build_axis_rtsp_url(
-    ip="<device-ip>", username="<user>", password="<pass>",
-    video_source=1, get_video_data=False, get_application_data=True, rtp_ext=True,
-)
+latest = None
+lock = threading.Lock()
 
-metadata_frames = []
 
-def on_app_data(payload):
-    metadata_frames.append(payload["data"])
+def on_video(sample):
+    global latest
+    with lock:
+        latest = sample  # the GUI thread reads `latest`; older frames are dropped
+```
 
-with RtspApplicationDataRetriever(rtsp_url=url, on_application_data=on_app_data) as r:
-    import time
-    time.sleep(10)  # Collect for 10 seconds
-print(f"Collected {len(metadata_frames)} metadata frames")
+### Match metadata to frames
+
+```python
+from collections import deque
+
+recent = deque(maxlen=60)  # (capture_time_ns, sample)
+
+
+def on_video(sample):
+    if sample.capture_time_ns is not None:
+        recent.append((sample.capture_time_ns, sample))
+
+
+def on_metadata(document):
+    t = document.utc_time_ns
+    if t is not None and recent:
+        capture, frame = min(list(recent), key=lambda item: abs(item[0] - t))
+        print(f"document matches frame {frame.rtp_timestamp}, {abs(capture - t) / 1e6:.1f} ms apart")
+```
+
+When video and metadata come from the same session, both callbacks run on the same thread, so no lock is needed here.
+
+### Failure handling
+
+```python
+from ax_devil_rtsp import StreamError
+
+session = StreamSession(url, config, on_video=on_video, on_failure=lambda exc: print("failed:", exc))
+try:
+    session.start()
+except StreamError as exc:
+    print("could not start:", exc)
 ```
