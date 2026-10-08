@@ -34,7 +34,12 @@ Device options build an Axis URL; `--resolution`, `--camera` and `--capture-time
 ## `doctor`
 
 Prints the package, Python, PyAV and FFmpeg versions, whether the `h264` and `hevc` decoders exist, and the hardware
-decoding device types available to `--hwaccel`. Exits with status 1 if a decoder is missing.
+backends compiled into FFmpeg. For each backend it attempts default-device initialization with both decoders:
+`READY` means initialization succeeded, `UNAVAILABLE` includes the initialization error, and `UNSUPPORTED` means
+the decoder has no hardware configuration for that backend. No camera or credentials are required.
+
+This checks initialization, not actual decoding or support for every stream profile and resolution. Hardware failures
+are informational because CPU decoding remains available. Exits with status 1 if a required decoder is missing.
 
 ## Workflows
 

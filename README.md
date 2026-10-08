@@ -25,7 +25,16 @@ That is all: decoding uses [PyAV](https://pyav.basswood-io.com/), whose wheels b
 Windows. No system packages are needed. `pip install 'ax-devil-rtsp[display]'` adds OpenCV for the CLI's video window.
 
 `ax-devil-rtsp doctor` shows the PyAV and FFmpeg versions, whether the H.264 and H.265 decoders are present, and which
-hardware decoding devices FFmpeg can use.
+hardware backends are compiled into FFmpeg. It also tries initializing the default hardware device for each backend
+with both decoders, without contacting a camera:
+
+- `READY`: the default device initialized for this decoder.
+- `UNAVAILABLE`: initialization failed, with the driver or permission error shown.
+- `UNSUPPORTED`: this decoder has no hardware configuration for that backend.
+
+Hardware decoding is optional and may need system GPU drivers. `READY` does not guarantee support for a particular
+stream's profile, bit depth or resolution, and does not prove frames were hardware-decoded. Hardware probe failures
+do not make `doctor` fail; missing H.264 or H.265 decoders do.
 
 ---
 

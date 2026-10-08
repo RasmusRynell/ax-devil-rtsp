@@ -189,9 +189,9 @@ def _import_cv2() -> Any:
 
 @cli.command()
 def doctor() -> None:
-    """Show the PyAV and FFmpeg versions, video decoders and hardware decoding devices."""
+    """Check video decoders and initialize hardware decoding devices without connecting to a camera."""
     import av
-    from av.codec.hwaccel import hwdevices_available
+    from av.codec.hwaccel import HWAccel, hwdevices_available
 
     click.echo(f"ax-devil-rtsp {__version__}, Python {platform.python_version()}, {platform.platform()}")
     click.echo(f"PyAV {av.__version__}, FFmpeg {av.ffmpeg_version_info}")
@@ -203,7 +203,24 @@ def doctor() -> None:
             missing.append(codec)
         click.echo(f"{'MISSING' if codec in missing else 'OK':8} {codec} decoder")
     devices = hwdevices_available()
-    click.echo(f"Hardware decoding devices (--hwaccel): {', '.join(devices) or 'none'}")
+    click.echo(f"Compiled hardware backends: {', '.join(devices) or 'none'}")
+    for codec in ("h264", "hevc"):
+        if codec in missing:
+            continue
+        for device in devices:
+            try:
+                decoder = av.CodecContext.create(codec, "r", hwaccel=HWAccel(device, allow_software_fallback=False))
+            except (av.error.FFmpegError, RuntimeError, ValueError, NotImplementedError) as exc:
+                click.echo(f"UNAVAILABLE {codec:4} --hwaccel {device}: {exc}")
+                continue
+            if decoder.is_hwaccel:
+                click.echo(f"READY       {codec:4} --hwaccel {device}: default device initialized")
+            else:
+                click.echo(f"UNSUPPORTED {codec:4} --hwaccel {device}: no hardware configuration for this decoder")
+    if devices:
+        click.echo(
+            "READY checks device initialization only; stream profile, resolution and actual decoding still matter."
+        )
     if missing:
         raise click.ClickException("reinstall PyAV: pip install --force-reinstall av")
 
