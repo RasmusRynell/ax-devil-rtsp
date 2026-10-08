@@ -162,7 +162,20 @@ def test_doctor_json_output(os_release, checks_result):
     assert data["ok"] is False
     assert data["package_manager"] == "pacman"
     assert data["install_command"] == "sudo pacman -S --needed gst-libav"
+    assert data["bindings_install_command"] is None
     assert data["checks"][0]["label"] == "Required plugins"
+
+
+def test_doctor_json_output_names_bindings_extra(os_release, checks_result):
+    os_release({"ID": "arch"})
+    checks_result(
+        [doctor.DoctorCheck("PyGObject", False, "No module named gi")],
+        list(doctor._REQUIRED_KEYS),
+    )
+
+    data = json.loads(CliRunner().invoke(doctor.doctor_command, ["--json"]).output)
+
+    assert data["bindings_install_command"] == "pip install 'ax-devil-rtsp[gstreamer]'"
 
 
 def test_doctor_text_output_shows_install_command(os_release, checks_result):

@@ -30,6 +30,8 @@ class EnvironmentReport:
     install_command: str | None
     # Command installing missing optional packages (the test-suite RTSP server).
     optional_install_command: str | None
+    # Linux only: PyGObject comes from the gstreamer extra, not the OS packages.
+    bindings_install_command: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -42,6 +44,7 @@ class EnvironmentReport:
             "package_manager": self.package_manager,
             "install_command": self.install_command,
             "optional_install_command": self.optional_install_command,
+            "bindings_install_command": self.bindings_install_command,
         }
 
 
@@ -306,6 +309,11 @@ def check_environment() -> EnvironmentReport:
         optional_install_command=_install_command(
             package_manager, [key for key in missing if key in _OPTIONAL_KEYS]
         ),
+        bindings_install_command=(
+            "pip install 'ax-devil-rtsp[gstreamer]'"
+            if sys.platform.startswith("linux") and "pygobject" in missing
+            else None
+        ),
     )
 
 
@@ -331,10 +339,6 @@ def render_doctor_report() -> int:
 
     if not report.ok:
         click.echo("")
-        # On Linux, PyGObject comes from the gstreamer extra, not the OS packages.
-        bindings_missing = sys.platform.startswith("linux") and any(
-            c.label == "PyGObject" and not c.ok for c in report.checks
-        )
         if report.install_command:
             click.echo("Install the missing packages:")
             click.echo(f"  {report.install_command}")
@@ -343,14 +347,14 @@ def render_doctor_report() -> int:
                 "No install command known for this OS. Install GStreamer with the "
                 "elements: " + ", ".join(REQUIRED_ELEMENTS)
             )
-        elif not bindings_missing:
+        elif not report.bindings_install_command:
             click.echo(
                 "Fix the MISSING items above. "
                 "Python packages: pip install ax-devil-rtsp"
             )
-        if bindings_missing:
+        if report.bindings_install_command:
             click.echo("Then install the Python bindings:")
-            click.echo("  pip install 'ax-devil-rtsp[gstreamer]'")
+            click.echo(f"  {report.bindings_install_command}")
     if report.optional_install_command:
         click.echo("")
         click.echo("Optional, needed to run the test suite:")

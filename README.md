@@ -74,6 +74,7 @@ from ax_devil_rtsp import check_environment, install_command
 report = check_environment()
 if not report.ok:
     print(report.install_command)  # only the missing packages
+    print(report.bindings_install_command)  # Linux: the gstreamer extra, if gi is missing
 
 print(install_command())  # full setup command for this OS, None if unsupported
 ```
