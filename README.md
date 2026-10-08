@@ -124,6 +124,8 @@ millisecond, the precision of `UtcTime`. `ax-devil-rtsp stream` prints this dist
 `password`, `port`, `camera` (video source), `resolution` and `capture_time`.
 
 Any other RTSP URL is used as given, including its credentials. Only `rtsp://` over TCP is supported.
+`session.name`, which logs and errors use, leaves out the URL's credentials and query, since a query can carry
+access tokens.
 
 If a metadata stream gives `400 Bad Request`, the camera's scene metadata producer is probably disabled; enable
 `AnalyticsSceneDescription` for that channel, for example with

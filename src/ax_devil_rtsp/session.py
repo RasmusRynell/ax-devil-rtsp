@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar, cast
+from urllib.parse import urlsplit
 
 import av
 from av.codec.hwaccel import HWAccel
@@ -136,6 +137,7 @@ class StreamSession:
 
     Args:
         url: Complete RTSP URL, used as given. Credentials in it are used for authentication and never logged.
+            `name`, which logs and errors use, also leaves out the query, since it can carry access tokens.
         config: What to receive and how.
         on_video: Called with each `VideoSample`; required exactly when `config.video` is set.
         on_metadata: Called with each `SceneMetadata`; required exactly when `config.metadata` is set.
@@ -159,7 +161,7 @@ class StreamSession:
         self.video_codec: str | None = None
         self.failure: BaseException | None = None
         self._connection = RtspConnection(url, config.timeout)
-        self.name = self._connection.url
+        self.name = urlsplit(self._connection.url)._replace(query="", fragment="").geturl()
         self._on_video = on_video
         self._on_metadata = on_metadata
         self._on_failure = on_failure

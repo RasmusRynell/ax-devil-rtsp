@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import threading
 from collections.abc import Iterator
@@ -324,6 +325,21 @@ def test_start_fails_with_a_wrong_password_without_leaking_it() -> None:
     camera.join()
 
     assert "wrong-password" not in f"{raised.value} {session.name} {session!r}"
+
+
+def test_query_tokens_stay_out_of_the_name_and_logs(caplog: pytest.LogCaptureFixture) -> None:
+    camera = FakeCamera(sdp(None, metadata=True), metadata_packets(DOCUMENTS), close_after_packets=True)
+    url = f"{camera.url(username='user', password='secret-password')}&token=secret-token"
+    received = Received(documents=99)
+
+    with caplog.at_level(logging.INFO, logger="ax_devil_rtsp"):
+        session = run(camera, StreamConfig(video=None, metadata=True), received, url=url)
+
+    assert session.name == f"rtsp://127.0.0.1:{camera.port}/axis-media/media.amp"
+    assert camera.request_uris[0].endswith("?camera=1&token=secret-token")
+    assert isinstance(received.failures[0], StreamError)
+    assert session.name in caplog.text
+    assert "secret" not in f"{session!r} {received.failures[0]} {caplog.text}"
 
 
 def test_start_fails_when_nothing_listens() -> None:
