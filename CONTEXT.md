@@ -22,8 +22,8 @@ before the connection is closed.
 A complete RTSP URL provided by the application. Credentials in it authenticate the
 session and are removed from request lines; everything else is used exactly as supplied.
 Axis URL construction settings are not merged into it, and the library does not inspect
-it to infer which media streams the camera will provide. Only the credential-free form
-is exposed, as the session name.
+it to infer which media streams the camera will provide. The session name, used in logs
+and errors, leaves out its credentials and query, since a query can carry access tokens.
 
 **Generated Axis URL**:
 A pure URL produced from structured Axis address, credential, source, and media settings

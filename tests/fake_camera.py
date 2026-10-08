@@ -124,7 +124,7 @@ def sdp(codec: str | None, metadata: bool) -> str:
 
 
 class FakeCamera:
-    """Serves one RTSP connection on localhost and records the request methods it receives."""
+    """Serves one RTSP connection on localhost and records the requests it receives."""
 
     def __init__(
         self,
@@ -148,6 +148,7 @@ class FakeCamera:
         self.packet_interval = packet_interval
         self.close_after_packets = close_after_packets
         self.requests: list[str] = []
+        self.request_uris: list[str] = []
         self.keepalive_received = threading.Event()
         self._listener = socket.create_server(("127.0.0.1", 0))
         self._listener.settimeout(10)
@@ -179,6 +180,7 @@ class FakeCamera:
                     method, uri, _ = line.decode().split(" ", 2)
                     headers = http.client.parse_headers(reader)
                     self.requests.append(method)
+                    self.request_uris.append(uri)
                     self._answer(connection, method, uri, headers)
             except OSError:
                 pass
