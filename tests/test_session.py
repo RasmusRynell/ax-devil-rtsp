@@ -331,22 +331,31 @@ def test_start_fails_when_nothing_listens() -> None:
         port = unused.getsockname()[1]
     session = StreamSession(f"rtsp://127.0.0.1:{port}/", StreamConfig(timeout=2), on_video=print)
 
-    with pytest.raises(StreamError, match="ConnectionRefusedError|not ready within 2 s"):
-        session.start()
-    session.join(5)
+    try:
+        with pytest.raises(StreamError) as raised:
+            session.start()
+    finally:
+        session.stop()
+        session.join(5)
+    assert session.failure is raised.value
     assert not session.is_running
 
 
-def test_start_reports_a_connection_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(address: object, *, timeout: float) -> socket.socket:
-        raise ConnectionRefusedError("connection refused")
+@pytest.mark.parametrize("error_type", [ConnectionRefusedError, TimeoutError])
+def test_start_reports_a_connection_error(error_type: type[OSError], monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(address: object, *, timeout: float) -> socket.socket:
+        raise error_type("connection failed")
 
-    monkeypatch.setattr(socket, "create_connection", refuse)
+    monkeypatch.setattr(socket, "create_connection", fail)
     session = StreamSession("rtsp://127.0.0.1/", StreamConfig(timeout=2), on_video=lambda sample: None)
 
-    with pytest.raises(StreamError, match="ConnectionRefusedError"):
-        session.start()
-    session.join(5)
+    try:
+        with pytest.raises(StreamError, match=error_type.__name__) as raised:
+            session.start()
+    finally:
+        session.stop()
+        session.join(5)
+    assert session.failure is raised.value
     assert not session.is_running
 
 
