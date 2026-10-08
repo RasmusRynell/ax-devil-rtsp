@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import http.client
+
 import pytest
 
 from ax_devil_rtsp import SceneMetadata, StreamConfig, VideoOutput, build_axis_rtsp_url
@@ -49,6 +51,41 @@ def test_parse_sdp_resolves_controls_against_the_base_url() -> None:
         ),
         Media("application", "VND.ONVIF.METADATA", {}, "rtsp://camera/other/track"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("base", "control", "expected"),
+    [
+        ("rtsp://camera/live.sdp", "trackID=1", "rtsp://camera/trackID=1"),
+        ("rtsp://camera/live/", "trackID=1", "rtsp://camera/live/trackID=1"),
+        ("rtsp://camera/live.sdp", "/trackID=1", "rtsp://camera/trackID=1"),
+        ("rtsp://camera/live/", "../trackID=1", "rtsp://camera/trackID=1"),
+        ("rtsp://camera/live.sdp?camera=2", "?track=1", "rtsp://camera/live.sdp?track=1"),
+        ("rtsp://camera/live.sdp", "//other/track", "rtsp://other/track"),
+        ("rtsp://camera/live.sdp", "rtsp://other/track", "rtsp://other/track"),
+        ("rtsp://camera/live.sdp?camera=2", "*", "rtsp://camera/live.sdp?camera=2"),
+        ("rtsp://camera/live.sdp?camera=2", "", "rtsp://camera/live.sdp?camera=2"),
+    ],
+)
+def test_parse_sdp_resolves_uri_references(base: str, control: str, expected: str) -> None:
+    sdp = f"v=0\na=control:{control}\nm=video 0 RTP/AVP 96\na=rtpmap:96 H264/90000\na=control:{control}"
+    aggregate, medias = parse_sdp(sdp, base)
+    assert aggregate == expected
+    assert medias[0].control == expected
+
+
+@pytest.mark.parametrize("header", ["Content-Base", "Content-Location"])
+def test_describe_resolves_relative_base_headers(header: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    connection = RtspConnection("rtsp://camera/original/live.sdp", timeout=1)
+    headers = http.client.HTTPMessage()
+    headers[header] = "/streams/live/"
+    body = b"v=0\na=control:*\nm=video 0 RTP/AVP 96\na=rtpmap:96 H264/90000\na=control:trackID=1"
+    monkeypatch.setattr(connection, "request", lambda *args: (headers, body))
+
+    aggregate, medias = connection.describe()
+
+    assert aggregate == "rtsp://camera/streams/live/"
+    assert medias[0].control == "rtsp://camera/streams/live/trackID=1"
 
 
 def test_requests_use_the_supplied_url_without_credentials() -> None:

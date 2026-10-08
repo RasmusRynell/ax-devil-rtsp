@@ -12,7 +12,7 @@ import secrets
 import socket
 import threading
 from typing import NamedTuple, cast
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +39,7 @@ class Media(NamedTuple):
 def _resolve_control(base: str, control: str) -> str:
     if control in ("", "*"):
         return base
-    if "://" in control:
-        return control
-    return f"{base.rstrip('/')}/{control}"
+    return urljoin(base, control)
 
 
 def parse_sdp(sdp: str, base: str) -> tuple[str, list[Media]]:
@@ -118,7 +116,7 @@ def _pick_challenge(headers: list[str]) -> tuple[str, dict[str, str]] | None:
 class RtspConnection:
     """One RTSP control connection that also carries the session's interleaved RTP and RTCP packets.
 
-    Only `teardown()` and `shutdown()` may be called from another thread than the one that drives the connection.
+    Only `keepalive()` and `shutdown()` may be called from another thread than the one that drives the connection.
     """
 
     def __init__(self, url: str, timeout: float) -> None:
@@ -139,6 +137,7 @@ class RtspConnection:
         self._cseq = 0
         self._nc = 0
         self._challenge: tuple[str, dict[str, str]] | None = None
+        self._keepalive_retried = False
         self._session_id = ""
         self._aggregate_url = self.url
 
@@ -153,7 +152,7 @@ class RtspConnection:
     def describe(self) -> tuple[str, list[Media]]:
         """Return the aggregate control URL and media sections of the stream."""
         headers, body = self.request("DESCRIBE", self.url, {"Accept": "application/sdp"})
-        base = headers.get("Content-Base") or headers.get("Content-Location") or self.url
+        base = urljoin(self.url, headers.get("Content-Base") or headers.get("Content-Location") or self.url)
         return parse_sdp(body.decode("utf-8", "replace"), base)
 
     def setup(self, url: str, channel: int) -> int:
@@ -178,15 +177,6 @@ class RtspConnection:
     def keepalive(self) -> None:
         """Keep the RTSP session alive; the reply is read and dropped by `read_packet()`."""
         self._send("GET_PARAMETER", self._aggregate_url, {})
-
-    def teardown(self) -> None:
-        """Ask the server to end the session; never raises."""
-        if not self._session_id:
-            return
-        try:
-            self._send("TEARDOWN", self._aggregate_url, {})
-        except OSError:
-            pass
 
     def shutdown(self) -> None:
         """Unblock any thread waiting on the socket; never raises."""
@@ -247,9 +237,18 @@ class RtspConnection:
     def _read_reply(self, head: bytes) -> None:
         status, reason, headers, _ = self._read_response(head)
         if status == 401:
-            self._challenge = _pick_challenge(headers.get_all("WWW-Authenticate") or []) or self._challenge
+            challenge = _pick_challenge(headers.get_all("WWW-Authenticate") or [])
+            if self._keepalive_retried or challenge is None:
+                raise StreamError("RTSP keepalive authentication was refused")
+            with self._send_lock:
+                self._challenge = challenge
+                self._nc = 0
+            self._keepalive_retried = True
+            self.keepalive()
         elif status != 200:
             logger.warning("RTSP keepalive answered %s %s", status, reason)
+        else:
+            self._keepalive_retried = False
 
     def _read_response(self, head: bytes) -> tuple[int, str, http.client.HTTPMessage, bytes]:
         assert self._reader is not None

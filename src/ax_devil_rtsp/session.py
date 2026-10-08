@@ -216,7 +216,6 @@ class StreamSession:
             return
         self._stopping.set()
         self._ready.set()
-        self._connection.teardown()
         self._connection.shutdown()
 
     def join(self, timeout: float | None = None) -> None:
@@ -286,17 +285,31 @@ class StreamSession:
 
     def _receive(self, handlers: dict[int, Callable[[bytes], None]]) -> None:
         connection = self._connection
-        keepalive_interval = max(connection.session_timeout / 2, 0.5)
-        next_keepalive = time.monotonic() + keepalive_interval
-        while not self._stopping.is_set():
-            channel, packet = connection.read_packet()
-            handler = handlers.get(channel)
-            if handler is not None:
-                handler(packet)
-            now = time.monotonic()
-            if now >= next_keepalive:
-                connection.keepalive()
-                next_keepalive = now + keepalive_interval
+        finished = threading.Event()
+        keepalive = threading.Thread(
+            target=self._keepalive, args=(finished,), name=f"keepalive {self.name}", daemon=True
+        )
+        keepalive.start()
+        try:
+            while not self._stopping.is_set():
+                channel, packet = connection.read_packet()
+                handler = handlers.get(channel)
+                if handler is not None:
+                    handler(packet)
+        finally:
+            finished.set()
+            connection.shutdown()
+            keepalive.join()
+
+    def _keepalive(self, finished: threading.Event) -> None:
+        interval = max(self._connection.session_timeout / 2, 0.5)
+        while not finished.wait(interval) and not self._stopping.is_set():
+            try:
+                self._connection.keepalive()
+            except OSError:
+                self._fail(StreamError("could not send RTSP keepalive"))
+                self._connection.shutdown()
+                return
 
     def _on_access_unit(self, data: bytes, rtp_timestamp: int, capture_time_ns: int | None, keyframe: bool) -> None:
         if self._decoder is None:

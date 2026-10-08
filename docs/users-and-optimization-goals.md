@@ -159,6 +159,11 @@ callbacks directly on the session's receive thread. The core should not add
 mandatory queues, worker dispatch, thread handoff, pull-based delivery, a separate
 `asyncio` client, or event-loop-specific cancellation.
 
+A session-owned sender handles RTSP keepalives independently of idle media or slow
+callbacks. It never invokes callbacks and is joined before the connection closes.
+Stopping shuts down TCP immediately instead of attempting a potentially blocking
+TEARDOWN write.
+
 `start()` should return a ready session only after the camera accepted PLAY for every
 requested stream. Readiness must not wait for the first video frame or metadata
 document; a startup timeout must fail and clean up the session.

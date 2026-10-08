@@ -136,15 +136,19 @@ class FakeCamera:
         session_timeout: int = 60,
         packet_interval: float = 0.0,
         close_after_packets: bool = False,
+        rotate_nonce: bool = False,
     ) -> None:
         self.sdp = sdp
         self.packets = packets
         self.username = username
         self.password = password
+        self.nonce = NONCE
+        self._rotate_nonce = rotate_nonce
         self.session_timeout = session_timeout
         self.packet_interval = packet_interval
         self.close_after_packets = close_after_packets
         self.requests: list[str] = []
+        self.keepalive_received = threading.Event()
         self._listener = socket.create_server(("127.0.0.1", 0))
         self._listener.settimeout(10)
         self.port = self._listener.getsockname()[1]
@@ -181,8 +185,11 @@ class FakeCamera:
 
     def _answer(self, connection: socket.socket, method: str, uri: str, headers: http.client.HTTPMessage) -> None:
         cseq = headers.get("CSeq", "0")
+        if method == "GET_PARAMETER" and self._rotate_nonce:
+            self.nonce = "fresh-nonce"
+            self._rotate_nonce = False
         if self.username and not self._authorized(method, uri, headers.get("Authorization", "")):
-            challenge = f'Digest realm="{REALM}", nonce="{NONCE}", qop="auth"'
+            challenge = f'Digest realm="{REALM}", nonce="{self.nonce}", qop="auth"'
             self._send(
                 connection, f"RTSP/1.0 401 Unauthorized\r\nCSeq: {cseq}\r\nWWW-Authenticate: {challenge}\r\n\r\n"
             )
@@ -198,6 +205,8 @@ class FakeCamera:
             extra = f"Session: 12345678;timeout={self.session_timeout}\r\nTransport: {headers['Transport']}\r\n"
         reply = f"RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\n{extra}Content-Length: {len(body)}\r\n\r\n{body}"
         self._send(connection, reply)
+        if method == "GET_PARAMETER":
+            self.keepalive_received.set()
         if method == "PLAY":
             threading.Thread(target=self._stream, args=(connection,), daemon=True).start()
 
@@ -207,7 +216,7 @@ class FakeCamera:
             self.username,
             self.password,
             REALM,
-            NONCE,
+            self.nonce,
             method,
             uri,
             qop="auth",

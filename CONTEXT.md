@@ -11,10 +11,12 @@ RTSP control, RTP and RTCP share one TCP connection (interleaved); UDP is not us
 _Avoid_: Retriever, client, worker
 
 **Receive Thread**:
-The one thread a Stream Session owns. It reads the socket, reassembles RTP, decodes,
+The thread that reads the socket, reassembles RTP, decodes,
 converts and runs every data callback, one at a time and in stream order. Nothing is
 queued between receiving and delivering, so a slow callback pushes back on the camera
-through TCP instead of growing memory.
+through TCP instead of growing memory. A separate session-owned sender keeps RTSP alive
+while media reads or callbacks are blocked; it never delivers callbacks and is joined
+before the connection is closed.
 
 **Supplied RTSP URL**:
 A complete RTSP URL provided by the application. Credentials in it authenticate the
@@ -72,8 +74,8 @@ does not require the camera to have delivered a payload.
 _Avoid_: First frame, first document
 
 **Requested Stop**:
-A nonblocking, idempotent application request that ends the session: TEARDOWN is sent on
-a best-effort basis and the socket is shut down. It is safe inside stream callbacks;
+A nonblocking, idempotent application request that ends the session by shutting down the
+socket. No TEARDOWN request is sent because a socket write could block. It is safe inside stream callbacks;
 synchronous waiting belongs to an external application thread.
 
 **Startup Cancellation**:

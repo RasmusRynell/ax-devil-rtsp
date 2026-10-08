@@ -71,6 +71,9 @@ callbacks one at a time, in stream order. There are no hidden queues: a slow cal
 the camera's TCP stream backs up instead of memory growing. Hand data to other threads yourself, and drop frames there
 if your consumer is slower than the camera.
 
+A separate sender keeps RTSP alive even while media is idle or a callback is blocked. It never invokes callbacks
+and ends with the session. Stopping shuts down the TCP connection immediately rather than waiting to send TEARDOWN.
+
 Every delivered value is owned by the receiver; keep it as long as you like.
 
 If a callback raises, the session stops and that exception becomes `session.failure`. If the connection, the camera or
