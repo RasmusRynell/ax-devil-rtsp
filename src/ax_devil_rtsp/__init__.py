@@ -1,35 +1,18 @@
-"""
-AX Devil RTSP - A Python package for handling RTSP streams from Axis cameras.
-"""
+"""Receive RTSP video and Axis scene metadata from Axis cameras."""
 
-from .rtsp_data_retrievers import (
-    RtspPayload,
-    VideoDataCallback,
-    ApplicationDataCallback,
-    ErrorCallback,
-    SessionStartCallback,
-    RtspDataRetriever,
-    RtspVideoDataRetriever,
-    RtspApplicationDataRetriever,
-)
-from .doctor import EnvironmentReport, check_environment, install_command
-from .utils import build_axis_rtsp_url
-from .utils.deps import ensure_gi_ready
+from .rtsp import StreamError
+from .session import SceneMetadata, StartCancelledError, StreamConfig, StreamSession, VideoOutput, VideoSample
+from .url import build_axis_rtsp_url
 
-__version__ = "0.3.0"
+__version__ = "0.5.0"
 
 __all__ = [
-    "RtspPayload",
-    "VideoDataCallback",
-    "ApplicationDataCallback",
-    "ErrorCallback",
-    "SessionStartCallback",
-    "RtspDataRetriever",
-    "RtspVideoDataRetriever",
-    "RtspApplicationDataRetriever",
+    "SceneMetadata",
+    "StartCancelledError",
+    "StreamConfig",
+    "StreamError",
+    "StreamSession",
+    "VideoOutput",
+    "VideoSample",
     "build_axis_rtsp_url",
-    "ensure_gi_ready",
-    "EnvironmentReport",
-    "check_environment",
-    "install_command",
 ]

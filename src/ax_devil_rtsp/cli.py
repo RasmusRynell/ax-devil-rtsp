@@ -1,425 +1,228 @@
+"""The `ax-devil-rtsp` command: stream from a camera or check the installation."""
+
 from __future__ import annotations
 
-import queue
-import sys
+import logging
+import platform
 import time
-from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from collections import deque
+from statistics import median
+from typing import Any
 
 import click
 
-from .doctor import doctor_command
-from .utils import build_axis_rtsp_url
-from .utils.logging import init_app_logging, get_logger
+from . import __version__
+from .rtsp import StreamError
+from .session import SceneMetadata, StreamConfig, StreamSession, VideoOutput, VideoSample
+from .url import build_axis_rtsp_url
 
-if TYPE_CHECKING:
-    import numpy as np
-
-
-def simple_video_processing_example(
-    payload: dict, shared_config: dict,
-) -> "np.ndarray":
-    """
-    Example video processing hook with a timestamp overlay and brightness adjustment.
-    """
-    import cv2
-
-    frame = payload["data"]
-    processed = frame.copy()
-
-    # Add timestamp overlay
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    cv2.putText(
-        processed, "Local: " +
-        timestamp, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
-    )
-
-    # Apply brightness adjustment if configured
-    brightness = shared_config.get("brightness_adjustment", 0)
-    if brightness != 0:
-        processed = cv2.convertScaleAbs(processed, alpha=1.0, beta=brightness)
-
-    # Add frame counter
-    shared_config["frame_count"] = shared_config.get("frame_count", 0) + 1
-    frame_text = f"Frame: {shared_config['frame_count']}"
-    cv2.putText(
-        processed, frame_text, (10,
-                                60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1
-    )
-
-    ntp_time = payload.get("latest_rtp_data", {}).get("human_time")
-    if ntp_time:
-        cv2.putText(
-            processed,
-            f"NTP: {ntp_time}",
-            (10, 90),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 255, 255),
-            1,
-        )
-
-    return processed
+_DISPLAY_FORMATS = ("bgr24", "bgra", "gray")
 
 
-def _display_loop(video_frames, args, retriever):
-    """Display loop for showing video frames."""
-    import cv2
+class _Stats:
+    """Per-second counters for the status line. Written by the receive thread, read by the main thread."""
 
-    if args.only_application_data:
-        print("Application data only mode - no video display")
-        try:
-            while retriever.is_running:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            return
-        return
+    def __init__(self, print_xml: bool) -> None:
+        self.print_xml = print_xml
+        self.frames = 0
+        self.frames_with_capture_time = 0
+        self.documents = 0
+        self.sync_ms: list[float] = []
+        self.capture_times: deque[int] = deque(maxlen=90)
+        self.latest_image: Any = None
 
-    print("Starting video display...")
+    def on_video(self, sample: VideoSample[Any]) -> None:
+        self.frames += 1
+        self.latest_image = sample.data
+        if sample.capture_time_ns is not None:
+            self.frames_with_capture_time += 1
+            self.capture_times.append(sample.capture_time_ns)
 
-    while retriever.is_running:
-        try:
-            frame = video_frames.get(timeout=0.1)
-            if frame is not None:
-                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                cv2.imshow("RTSP Stream", frame_bgr)
+    def on_metadata(self, document: SceneMetadata) -> None:
+        self.documents += 1
+        if self.print_xml:
+            click.echo(document.xml)
+        utc_time_ns = document.utc_time_ns
+        capture_times = list(self.capture_times)
+        if utc_time_ns is not None and capture_times:
+            self.sync_ms.append(min(abs(utc_time_ns - t) for t in capture_times) / 1e6)
 
-            # Check for 'q' key to quit
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                print("User pressed 'q' to quit")
-                break
-
-        except queue.Empty:
-            continue
-        except KeyboardInterrupt:
-            print("Keyboard interrupt received")
-            break
-        except Exception as e:
-            print(f"Error in display loop: {e}", file=sys.stderr)
-            break
-
-    cv2.destroyAllWindows()
-
-
-def main(**kwargs):
-    from .rtsp_data_retrievers import (
-        RtspApplicationDataRetriever,
-        RtspDataRetriever,
-        RtspVideoDataRetriever,
-    )
-
-    args = SimpleNamespace(**kwargs)
-    init_app_logging(
-        log_level=args.log_level,
-        log_file=getattr(args, "log_file", None),
-        logs_dir=getattr(args, "logs_dir", None),
-    )
-    logger = get_logger("cli")
-    logger.info(f"Starting with args: {args}")
-
-    if getattr(args, "rtsp_url", None):
-        rtsp_url = args.rtsp_url
-    else:
-        try:
-            rtsp_url = build_axis_rtsp_url(
-                ip=args.device_ip,
-                username=args.device_username,
-                password=args.device_password,
-                video_source=getattr(args, "source", 1),
-                get_video_data=not args.only_application_data,
-                get_application_data=not args.only_video,
-                rtp_ext=getattr(args, "rtp_ext", True),
-                resolution=getattr(args, "resolution", None),
-            )
-        except ValueError as e:
-            logger.error(e)
-            sys.exit(1)
-    print(f"Starting stream on rtsp_url={rtsp_url}")
-
-    # Callback functions for handling different data types
-    # Queue for transferring frames to the main thread
-    video_frames: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=1)
-
-    def on_video_data(payload):
-        if args.only_application_data:
-            return
-        frame = payload["data"]
-        try:
-            video_frames.put_nowait(frame)
-        except queue.Full:
-            # Drop frame if the display thread is lagging
-            pass
-
-    def on_application_data(payload):
-        if args.only_video:
-            return
-        xml = payload["data"]
-        diag = payload["diagnostics"]
-        logger.info(f"[APPLICATION DATA] {len(xml)} bytes, diag={diag}")
-        print(xml)
-
-    def on_session_start(payload):
-        caps_media = payload.get("caps_parsed", {}).get("media")
-        structure_media = payload.get("structure_parsed", {}).get("media")
-        media = caps_media or structure_media
-        logger.info(
-            f"[SESSION METADATA] {media} pad={payload.get('stream_name')} "
-            f"caps={payload.get('caps')}"
-        )
-
-    def on_error(payload):
-        error_type = payload.get("error_type", "Unknown")
-        message = payload.get("message", "Unknown error")
-        error_count = payload.get("error_count", 0)
-        logger.error(
-            f"[ERROR] {error_type}: {message} (total errors: {error_count})")
-
-    # Set up video processing if requested
-    video_processing_fn = None
-    shared_config = None
-    if args.enable_video_processing and not args.only_application_data:
-        video_processing_fn = simple_video_processing_example
-        shared_config = {
-            "brightness_adjustment": args.brightness_adjustment,
-            "frame_count": 0,
-        }
-        logger.info(
-            "Video processing enabled with brightness adjustment: "
-            f"{args.brightness_adjustment}"
-        )
-
-    retriever_classes = {
-        (True, False): (RtspVideoDataRetriever, "video-only retriever"),
-        (False, True): (RtspApplicationDataRetriever, "application data-only retriever"),
-        (False, False): (RtspDataRetriever, "combined video+application data retriever")
-    }
-
-    retriever_class, desc = retriever_classes[(
-        args.only_video, args.only_application_data)]
-    logger.info(f"Using {retriever_class.__name__} ({desc})")
-
-    # Build kwargs based on retriever class signature
-    kwargs = {
-        "rtsp_url": rtsp_url,
-        "on_session_start": on_session_start,
-        "on_error": on_error,
-        "latency": args.latency,
-        "video_processing_fn": video_processing_fn,
-        "shared_config": shared_config,
-        "connection_timeout": args.connection_timeout,
-    }
-
-    # Add class-specific callback arguments
-    if retriever_class is RtspVideoDataRetriever:
-        kwargs["on_video_data"] = on_video_data
-    elif retriever_class is RtspApplicationDataRetriever:
-        kwargs["on_application_data"] = on_application_data
-    else:  # RtspDataRetriever
-        kwargs["on_video_data"] = on_video_data
-        kwargs["on_application_data"] = on_application_data
-
-    retriever = retriever_class(**kwargs)
-
-    try:
-        print(
-            f"Using {'manual lifecycle' if args.manual_lifecycle else 'context manager'}")
-
-        if args.manual_lifecycle:
-            retriever.start()
-            try:
-                print(
-                    "Press Ctrl+C to stop, or 'q' in video window to quit")
-                _display_loop(video_frames, args, retriever)
-            finally:
-                retriever.stop()
-        else:
-            with retriever:
-                print(
-                    "Press Ctrl+C to stop, or 'q' in video window to quit")
-                _display_loop(video_frames, args, retriever)
-    except KeyboardInterrupt:
-        logger.info("Interrupted by user")
-    except Exception as e:
-        logger.error(f"Error running retriever: {e}")
-    finally:
-        logger.info("Cleaning up...")
-        if not args.only_application_data:
-            import cv2
-            cv2.destroyAllWindows()
+    def report(self, seconds: float) -> str:
+        parts = []
+        if self.frames:
+            coverage = 100 * self.frames_with_capture_time / self.frames
+            parts.append(f"video {self.frames / seconds:5.1f} fps, capture time {coverage:3.0f}%")
+        if self.documents:
+            parts.append(f"metadata {self.documents / seconds:5.1f} docs/s")
+        if self.sync_ms:
+            parts.append(f"metadata to nearest frame {median(self.sync_ms):.1f} ms")
+        self.frames = self.frames_with_capture_time = self.documents = 0
+        self.sync_ms = []
+        return " | ".join(parts) or "no data"
 
 
-def _shared_options(func):
-    """Decorator for options common to all commands."""
-
-    func = click.option(
-        "--latency",
-        default=100,
-        show_default=True,
-        type=int,
-        help="RTSP latency in ms (to gather out of order packets)",
-    )(func)
-
-    func = click.option(
-        "--only-video",
-        is_flag=True,
-        default=False,
-        show_default=True,
-        help=(
-            "Enable only video frames (disable application data)"
-        ),
-    )(func)
-
-    func = click.option(
-        "--only-application-data",
-        is_flag=True,
-        default=False,
-        show_default=True,
-        help=(
-            "Enable only application data XML (disable video)"
-        ),
-    )(func)
-
-    func = click.option(
-        "--log-level",
-        default="INFO",
-        show_default=True,
-        type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
-        help="Logging verbosity",
-    )(func)
-
-    func = click.option(
-        "--log-file",
-        type=click.Path(path_type=str, dir_okay=False, writable=True),
-        help="Path to the rotating log file (defaults to ~/.ax_devil/logs/ax-devil-rtsp/ax-devil-rtsp.log)",
-    )(func)
-
-    func = click.option(
-        "--logs-dir",
-        type=click.Path(path_type=str, file_okay=False, writable=True),
-        help="Directory for log files (overrides default cache directory)",
-    )(func)
-
-    func = click.option(
-        "--connection-timeout",
-        default=30,
-        show_default=True,
-        type=int,
-        help="Connection timeout in seconds",
-    )(func)
-
-    func = click.option(
-        "--enable-video-processing",
-        is_flag=True,
-        default=False,
-        show_default=True,
-        help=(
-            "Enable example video processing with timestamp overlay "
-            "and brightness adjustment"
-        ),
-    )(func)
-
-    func = click.option(
-        "--brightness-adjustment",
-        default=0,
-        show_default=True,
-        type=int,
-        help="Brightness adjustment value for video processing example (-100 to 100)",
-    )(func)
-
-    func = click.option(
-        "--manual-lifecycle",
-        is_flag=True,
-        default=False,
-        show_default=True,
-        help="Use manual start()/stop() instead of the context manager",
-    )(func)
-
-    return func
+@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.version_option(__version__)
+def cli() -> None:
+    """Receive RTSP video and Axis scene metadata from Axis cameras."""
 
 
-@click.group(
-    context_settings={"help_option_names": ["-h", "--help"]},
-    invoke_without_command=True,
-)
+@cli.command()
+@click.option("--url", help="Complete RTSP URL, used as given instead of the device options.")
+@click.option("-a", "--device-ip", envvar="AX_DEVIL_TARGET_ADDR", show_envvar=True, help="Camera address.")
+@click.option("-u", "--device-username", envvar="AX_DEVIL_TARGET_USER", show_envvar=True, default="")
+@click.option("-p", "--device-password", envvar="AX_DEVIL_TARGET_PASS", show_envvar=True, default="")
+@click.option("--camera", default="1", show_default=True, help="Video source on the camera.")
+@click.option("--resolution", help="Video resolution such as 1280x720; the camera default when omitted.")
 @click.option(
-    "--url",
-    "rtsp_url",
-    type=str,
-    help="Connect using an existing RTSP URL (skips device URL construction).",
-)
-@click.option(
-    "--device-ip",
-    "-a",
-    envvar="AX_DEVIL_TARGET_ADDR",
-    required=False,
-    show_envvar=True,
-    help="Device IP address or hostname",
-)
-@click.option(
-    "--device-username",
-    "-u",
-    envvar="AX_DEVIL_TARGET_USER",
-    default="",
-    show_default=True,
-    show_envvar=True,
-    help="Device username",
-)
-@click.option(
-    "--device-password",
-    "-p",
-    envvar="AX_DEVIL_TARGET_PASS",
-    default="",
-    show_default=True,
-    show_envvar=True,
-    help="Device password",
-)
-@click.option(
-    "--source",
-    default="1",
-    show_default=True,
-    help='What device "source"/"camera head" to use',
-)
-@click.option(
-    "--rtp-ext/--no-rtp-ext",
+    "--capture-time/--no-capture-time",
     default=True,
     show_default=True,
-    help="Enable or disable RTP extension",
+    help="Ask the camera for per-frame capture times (onvifreplayext=1).",
 )
 @click.option(
-    "--resolution",
-    default=None,
+    "--video",
+    type=click.Choice([output.value for output in VideoOutput] + ["none"]),
+    default="bgr24",
     show_default=True,
-    help=(
-        "Video resolution (e.g. 1280x720 or 500x500) "
-        "(default: None, lets device decide)"
-    ),
+    help="What each video frame is delivered as.",
 )
-@_shared_options
-@click.pass_context
-def cli(
-    ctx: click.Context,
-    rtsp_url: str | None,
+@click.option("--metadata/--no-metadata", default=True, show_default=True, help="Receive scene metadata.")
+@click.option("--hwaccel", help="Hardware decoding device type, see `ax-devil-rtsp doctor`.")
+@click.option("--timeout", default=15.0, show_default=True, help="Seconds to become ready and without data.")
+@click.option("--display", is_flag=True, help="Show the video in a window; needs opencv-python.")
+@click.option("--print-xml", is_flag=True, help="Print every scene metadata document.")
+@click.option("--duration", type=float, help="Stop after this many seconds.")
+@click.option(
+    "--log-level",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
+    default="INFO",
+    show_default=True,
+)
+def stream(
+    url: str | None,
     device_ip: str | None,
-    **kwargs,
+    device_username: str,
+    device_password: str,
+    camera: str,
+    resolution: str | None,
+    capture_time: bool,
+    video: str,
+    metadata: bool,
+    hwaccel: str | None,
+    timeout: float,
+    display: bool,
+    print_xml: bool,
+    duration: float | None,
+    log_level: str,
 ) -> None:
-    """Retrieve RTSP video and application data from Axis devices."""
-    if ctx.invoked_subcommand is not None:
-        return
-
-    if rtsp_url:
-        main(rtsp_url=rtsp_url, **kwargs)
-        return
-
-    if not device_ip:
-        raise click.UsageError(
-            "Provide --url or --device-ip/AX_DEVIL_TARGET_ADDR to build the RTSP URL.",
-            ctx=click.get_current_context(),
+    """Stream video and scene metadata and print rates and metadata-to-video sync once per second."""
+    logging.basicConfig(level=log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if display and video not in _DISPLAY_FORMATS:
+        raise click.UsageError(f"--display needs --video {', '.join(_DISPLAY_FORMATS)}")
+    try:
+        config = StreamConfig(
+            video=None if video == "none" else VideoOutput(video),
+            metadata=metadata,
+            hwaccel=hwaccel,
+            timeout=timeout,
         )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from None
+    if url is None:
+        if not device_ip:
+            raise click.UsageError("give --url or --device-ip (or set AX_DEVIL_TARGET_ADDR)")
+        url = build_axis_rtsp_url(
+            device_ip,
+            config,
+            username=device_username,
+            password=device_password,
+            camera=camera,
+            resolution=resolution,
+            capture_time=capture_time,
+        )
+    cv2 = _import_cv2() if display else None
 
-    main(device_ip=device_ip, **kwargs)
+    stats = _Stats(print_xml)
+    session = StreamSession(
+        url,
+        config,
+        on_video=stats.on_video if config.video else None,
+        on_metadata=stats.on_metadata if metadata else None,
+    )
+    click.echo(f"Connecting to {session.name}")
+    try:
+        session.start()
+    except StreamError as exc:
+        raise click.ClickException(str(exc)) from None
+    started = last_report = time.monotonic()
+    try:
+        while session.is_running and (duration is None or time.monotonic() - started < duration):
+            if cv2 is not None and stats.latest_image is not None:
+                cv2.imshow("ax-devil-rtsp", stats.latest_image)
+                if cv2.waitKey(10) & 0xFF == ord("q"):
+                    break
+            else:
+                time.sleep(0.05)
+            now = time.monotonic()
+            if now - last_report >= 1:
+                click.echo(stats.report(now - last_report))
+                last_report = now
+    except KeyboardInterrupt:
+        pass
+    finally:
+        session.stop()
+        session.join()
+        if cv2 is not None:
+            cv2.destroyAllWindows()
+    if session.failure is not None:
+        raise click.ClickException(str(session.failure))
 
 
-cli.add_command(doctor_command)
+def _import_cv2() -> Any:
+    try:
+        import cv2
+    except ImportError:
+        raise click.UsageError("--display needs OpenCV: pip install 'ax-devil-rtsp[display]'") from None
+    return cv2
+
+
+@cli.command()
+def doctor() -> None:
+    """Check video decoders and initialize hardware decoding devices without connecting to a camera."""
+    import av
+    from av.codec.hwaccel import HWAccel, hwdevices_available
+
+    click.echo(f"ax-devil-rtsp {__version__}, Python {platform.python_version()}, {platform.platform()}")
+    click.echo(f"PyAV {av.__version__}, FFmpeg {av.ffmpeg_version_info}")
+    missing = []
+    for codec in ("h264", "hevc"):
+        try:
+            av.Codec(codec, "r")
+        except av.codec.codec.UnknownCodecError:
+            missing.append(codec)
+        click.echo(f"{'MISSING' if codec in missing else 'OK':8} {codec} decoder")
+    devices = hwdevices_available()
+    click.echo(f"Compiled hardware backends: {', '.join(devices) or 'none'}")
+    for codec in ("h264", "hevc"):
+        if codec in missing:
+            continue
+        for device in devices:
+            try:
+                decoder = av.CodecContext.create(codec, "r", hwaccel=HWAccel(device, allow_software_fallback=False))
+            except (av.error.FFmpegError, RuntimeError, ValueError, NotImplementedError) as exc:
+                click.echo(f"UNAVAILABLE {codec:4} --hwaccel {device}: {exc}")
+                continue
+            if decoder.is_hwaccel:
+                click.echo(f"READY       {codec:4} --hwaccel {device}: default device initialized")
+            else:
+                click.echo(f"UNSUPPORTED {codec:4} --hwaccel {device}: no hardware configuration for this decoder")
+    if devices:
+        click.echo(
+            "READY checks device initialization only; stream profile, resolution and actual decoding still matter."
+        )
+    if missing:
+        raise click.ClickException("reinstall PyAV: pip install --force-reinstall av")
 
 
 if __name__ == "__main__":

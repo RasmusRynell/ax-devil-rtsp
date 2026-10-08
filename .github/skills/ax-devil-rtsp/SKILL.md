@@ -1,35 +1,26 @@
 ---
 name: ax-devil-rtsp
-description: 'Use the ax-devil-rtsp package (CLI and Python API) to stream RTSP video and AXIS Scene Metadata from Axis cameras. Use when asked to "stream video", "RTSP stream", "get video frames", "application data", "scene metadata over RTSP", "build RTSP URL", "video callback", write code using RtspDataRetriever or build_axis_rtsp_url, or display a live camera feed.'
+description: 'Use the ax-devil-rtsp package (CLI and Python API) to stream RTSP video and AXIS Scene Metadata from Axis cameras. Use when asked to "stream video", "RTSP stream", "get video frames", "scene metadata over RTSP", "sync metadata with video", "build RTSP URL", "video callback", write code using StreamSession, StreamConfig or build_axis_rtsp_url, or display a live camera feed.'
 ---
 
 # ax-devil-rtsp
 
-Python package for streaming RTSP video and AXIS Scene Metadata (application data) from Axis devices. Runs GStreamer in a subprocess and delivers frames/metadata via callbacks.
+Python package for receiving RTSP video and AXIS Scene Metadata from Axis cameras. Its own RTSP/RTP client runs over
+TCP; PyAV (FFmpeg) decodes. Video and metadata arrive through callbacks on one receive thread per session, with
+per-frame capture times for matching the two.
 
 **Package**: `ax-devil-rtsp` (PyPI)
-**Depends on**: `numpy`, `opencv-python`, `click`, `PyGObject`, GStreamer (system)
+**Depends on**: `av` (PyAV, bundles FFmpeg), `numpy`, `click`. No system packages. Optional `[display]` adds OpenCV.
 
 ## Prerequisites — MUST do before any command
 
-1. **Ensure system dependencies are installed.** GStreamer and GI bindings are required (Linux):
-   ```bash
-   sudo apt-get install -y \
-     gcc cmake pkg-config python3-dev libcairo2-dev libffi-dev libglib2.0-dev \
-     libgirepository-2.0-dev gobject-introspection \
-     python3-gi python3-gst-1.0 \
-     gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
-     gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-     gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
-   ```
-   Run `ax-devil-rtsp doctor` to verify.
-
-2. **Ensure the CLI is installed.** Run `which ax-devil-rtsp`. If not found:
+1. **Ensure the CLI is installed.** Run `which ax-devil-rtsp`. If not found:
    ```bash
    uv tool install ax-devil-rtsp
    ```
+   `ax-devil-rtsp doctor` checks PyAV, the H.264/H.265 decoders and hardware decoding devices.
 
-3. **Resolve credentials.** Before running any command or writing code, you MUST have concrete values:
+2. **Resolve credentials.** Before running any command or writing code, you MUST have concrete values:
    - Check env vars: `echo $AX_DEVIL_TARGET_ADDR $AX_DEVIL_TARGET_USER $AX_DEVIL_TARGET_PASS`
    - If any required value is missing or empty, **ASK the user** — do NOT guess or use placeholder IPs.
    - If the user provides a full `--url`, no device credentials are needed.
@@ -48,24 +39,28 @@ The CLI reads these when the corresponding flag is not supplied:
 
 Load only the reference you need:
 
-- **[CLI Reference](./references/cli.md)** — CLI options, modes, and workflows
-- **[Python API Reference](./references/python-api.md)** — `RtspDataRetriever`, `build_axis_rtsp_url`, callbacks, and Python workflows
+- **[CLI Reference](./references/cli.md)** — `stream` and `doctor` options and workflows
+- **[Python API Reference](./references/python-api.md)** — `StreamSession`, `StreamConfig`, `VideoOutput`, callbacks, URL building
 
 ## Quick Decision Guide
 
 | Task | Tool | Reference |
 |------|------|-----------|
-| View live video + metadata (demo) | `ax-devil-rtsp` CLI | [CLI](./references/cli.md) |
-| Stream only application data | `--only-application-data` or `RtspApplicationDataRetriever` | [CLI](./references/cli.md) / [Python](./references/python-api.md) |
-| Stream only video | `--only-video` or `RtspVideoDataRetriever` | [CLI](./references/cli.md) / [Python](./references/python-api.md) |
-| Stream both video + metadata in Python | `RtspDataRetriever` | [Python](./references/python-api.md) |
-| Build an Axis RTSP URL from parameters | `build_axis_rtsp_url()` | [Python](./references/python-api.md) |
-| Check GStreamer dependencies | `ax-devil-rtsp doctor` | [CLI](./references/cli.md) |
+| Check rates and metadata-to-video sync | `ax-devil-rtsp stream` | [CLI](./references/cli.md) |
+| View live video | `ax-devil-rtsp stream --display` | [CLI](./references/cli.md) |
+| Print scene metadata XML | `ax-devil-rtsp stream --video none --print-xml` | [CLI](./references/cli.md) |
+| Receive frames and/or metadata in Python | `StreamSession` + `StreamConfig` | [Python](./references/python-api.md) |
+| Build an Axis RTSP URL | `build_axis_rtsp_url(host, config, ...)` | [Python](./references/python-api.md) |
+| Check the installation | `ax-devil-rtsp doctor` | [CLI](./references/cli.md) |
 
 ## Key Concepts
 
-- **GStreamer subprocess**: All retrievers run GStreamer in a spawned subprocess. Data flows through a multiprocessing queue to your callbacks in the main process.
-- **`spawn` start method**: The package forces `mp.set_start_method('spawn')`. Always use `if __name__ == "__main__":` guard. Call `freeze_support()` for Windows compatibility.
-- **Context manager**: Use `with retriever:` for automatic cleanup. Alternatively call `start()`/`stop()` manually.
-- **Callbacks**: `on_video_data(payload)` receives `{"data": np.ndarray, ...}`. `on_application_data(payload)` receives `{"data": bytes, "diagnostics": ...}`. `on_session_start(payload)` fires once per RTP pad.
-- **Application data** = AXIS Scene Metadata (ONVIF XML) carried in the RTSP stream alongside video.
+- **One session, one config**: `StreamSession(url, StreamConfig(video=..., metadata=...), on_video=..., on_metadata=...)`.
+  Pass `on_video` exactly when `video` is set and `on_metadata` exactly when `metadata` is true.
+- **`VideoOutput`** fixes what `VideoSample.data` is: `ENCODED` (Annex-B bytes), `DECODED` (`av.VideoFrame`), or a
+  NumPy array in `RGB24`, `BGR24`, `RGBA`, `BGRA` or `GRAY`.
+- **Threads**: callbacks run on the session's receive thread. Keep them fast; hand data off yourself.
+- **Lifecycle**: `start()` blocks until PLAY succeeded and raises `StreamError` on failure; `stop()` never blocks;
+  `with session:` does both. Sessions are one-shot.
+- **Sync**: `VideoSample.capture_time_ns` vs `SceneMetadata.utc_time_ns`, both Unix nanoseconds, agree within ~1 ms.
+- **Metadata 400 Bad Request** means the camera's `AnalyticsSceneDescription` producer is disabled for that channel.

@@ -1,121 +1,68 @@
-# ax-devil-rtsp CLI Reference
+# CLI Reference
 
-Entry point: `ax-devil-rtsp`.
-
-**Install** (if `which ax-devil-rtsp` returns nothing):
 ```bash
-uv tool install ax-devil-rtsp
-```
-
-**Check system dependencies**:
-```bash
+ax-devil-rtsp stream [OPTIONS]
 ax-devil-rtsp doctor
 ```
 
-## Environment Variables
+## `stream`
 
-The CLI reads these when the corresponding flag is not supplied:
+Connects, streams, and prints one status line per second: video frame rate, share of frames with a capture time,
+metadata documents per second and the median distance between each document's `UtcTime` and the nearest frame's
+capture time. Ctrl+C (or `q` in the video window) stops. Exits with status 1 and the error if the stream fails.
 
-| Variable | CLI flag fallback |
-|----------|-------------------|
-| `AX_DEVIL_TARGET_ADDR` | `--device-ip` / `-a` |
-| `AX_DEVIL_TARGET_USER` | `--device-username` / `-u` |
-| `AX_DEVIL_TARGET_PASS` | `--device-password` / `-p` |
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `--url TEXT` | | Complete RTSP URL, used as given; the device options are ignored |
+| `-a, --device-ip TEXT` | `$AX_DEVIL_TARGET_ADDR` | Camera address |
+| `-u, --device-username TEXT` | `$AX_DEVIL_TARGET_USER` | Camera user |
+| `-p, --device-password TEXT` | `$AX_DEVIL_TARGET_PASS` | Camera password |
+| `--camera TEXT` | `1` | Video source on the camera |
+| `--resolution TEXT` | camera default | For example `1280x720` |
+| `--capture-time / --no-capture-time` | on | Ask for per-frame capture times (`onvifreplayext=1`) |
+| `--video [encoded\|decoded\|rgb24\|bgr24\|rgba\|bgra\|gray\|none]` | `bgr24` | What each frame is delivered as |
+| `--metadata / --no-metadata` | on | Receive scene metadata |
+| `--hwaccel TEXT` | | FFmpeg hardware device type, see `doctor` |
+| `--timeout FLOAT` | `15` | Seconds to become ready, and without data before failing |
+| `--display` | | Show video in a window; needs `ax-devil-rtsp[display]` and `--video bgr24`, `bgra` or `gray` |
+| `--print-xml` | | Print every metadata document |
+| `--duration FLOAT` | | Stop after this many seconds |
+| `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR` |
 
-## Usage
+Device options build an Axis URL; `--resolution`, `--camera` and `--capture-time` only apply then.
 
-The main command opens a video window and/or prints application data. The `doctor` subcommand checks system dependencies.
+## `doctor`
 
-### Connect via device credentials
+Prints the package, Python, PyAV and FFmpeg versions, whether the `h264` and `hevc` decoders exist, and the hardware
+backends compiled into FFmpeg. For each backend it attempts default-device initialization with both decoders:
+`READY` means initialization succeeded, `UNAVAILABLE` includes the initialization error, and `UNSUPPORTED` means
+the decoder has no hardware configuration for that backend. No camera or credentials are required.
 
-```bash
-ax-devil-rtsp \
-  --device-ip <ip> --device-username <user> --device-password <pass>
-```
+This checks initialization, not actual decoding or support for every stream profile and resolution. Hardware failures
+are informational because CPU decoding remains available. Exits with status 1 if a required decoder is missing.
 
-### Connect via existing RTSP URL
-
-```bash
-ax-devil-rtsp --url "rtsp://<user>:<pass>@<ip>/axis-media/media.amp?analytics=polygon"
-```
-
-When using `--url`, device-specific options like `--resolution` and `--source` are ignored.
-
-## Options
-
-### Connection options
-
-| Flag | Short | Env var | Description |
-|------|-------|---------|-------------|
-| `--device-ip` | `-a` | `AX_DEVIL_TARGET_ADDR` | Device IP or hostname |
-| `--device-username` | `-u` | `AX_DEVIL_TARGET_USER` | Device username (default: empty) |
-| `--device-password` | `-p` | `AX_DEVIL_TARGET_PASS` | Device password (default: empty) |
-| `--url` | — | — | Full RTSP URL (skips URL construction) |
-
-### Stream options (only with `--device-ip`, not `--url`)
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--source` | `1` | Camera head / video source index |
-| `--resolution` | device default | e.g. `1280x720`, `640x480` |
-| `--rtp-ext / --no-rtp-ext` | enabled | RTP extension data (NTP timestamps) |
-
-### Mode options
-
-| Flag | Description |
-|------|-------------|
-| `--only-video` | Disable application data, video only |
-| `--only-application-data` | Disable video, metadata only (no display window) |
-
-### Tuning options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--latency` | `100` | GStreamer pipeline latency in ms (Python API default is `200`) |
-| `--connection-timeout` | `30` | Connection timeout in seconds |
-| `--enable-video-processing` | off | Enable timestamp overlay + brightness |
-| `--brightness-adjustment` | `0` | Brightness value (-100 to 100) |
-| `--manual-lifecycle` | off | Use `start()`/`stop()` instead of context manager |
-| `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
-| `--log-file` | auto | Path to rotating log file |
-| `--logs-dir` | auto | Directory for log files |
-
-### Subcommands
-
-#### `doctor` — Check system dependencies
+## Workflows
 
 ```bash
-ax-devil-rtsp doctor
+# Video and metadata, with sync figures
+ax-devil-rtsp stream -a 192.168.1.90 -u root -p secret
+
+# Live window
+ax-devil-rtsp stream --display
+
+# Metadata only, print XML, stop after 10 s
+ax-devil-rtsp stream --video none --print-xml --duration 10
+
+# Existing URL, encoded video only (no decoding cost)
+ax-devil-rtsp stream --url "rtsp://root:secret@192.168.1.90/axis-media/media.amp?videocodec=h265" \
+  --video encoded --no-metadata
 ```
 
-Verifies GStreamer, GI bindings, and other host dependencies, and prints the apt/pacman command for anything missing. Run this first if streaming fails. `--json` prints the report as JSON; exit code is 1 when a required dependency is missing.
+## Troubleshooting
 
-## Typical CLI Workflows
-
-### Stream video + metadata from a camera
-
-```bash
-ax-devil-rtsp --device-ip <ip> -u <user> -p <pass>
-```
-
-Press `q` in the video window or Ctrl-C to stop.
-
-### Stream only application data (no video window)
-
-```bash
-ax-devil-rtsp --device-ip <ip> -u <user> -p <pass> --only-application-data
-```
-
-Prints ONVIF XML metadata to stdout.
-
-### Stream with specific resolution
-
-```bash
-ax-devil-rtsp --device-ip <ip> -u <user> -p <pass> --resolution 1280x720
-```
-
-### Diagnose GStreamer issues
-
-```bash
-ax-devil-rtsp doctor
-```
+| Symptom | Cause |
+|---------|-------|
+| `DESCRIBE failed with 400 Bad Request` with metadata on | The camera's `AnalyticsSceneDescription` producer is disabled for that channel |
+| `DESCRIBE was refused with 401` | Wrong or missing credentials |
+| `the stream has no scene metadata` | A `--url` without `analytics=polygon`; add it or use `--no-metadata` |
+| `capture time 0%` | The URL lacks `onvifreplayext=1`, or `--no-capture-time` was given |
