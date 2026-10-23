@@ -9,6 +9,7 @@ import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar, cast
 from urllib.parse import urlsplit
@@ -16,7 +17,7 @@ from urllib.parse import urlsplit
 import av
 from av.codec.hwaccel import HWAccel
 
-from .rtp import AccessUnitAssembler, MetadataAssembler, sdp_parameter_sets
+from .rtp import AccessUnitAssembler, MetadataAssembler, is_rtcp_bye, sdp_parameter_sets
 from .rtsp import RtspConnection, StreamError
 
 if TYPE_CHECKING:
@@ -114,6 +115,12 @@ class SceneMetadata:
             return None
         seconds = calendar.timegm(time.strptime(match.group(1), "%Y-%m-%dT%H:%M:%S"))
         return seconds * 1_000_000_000 + int((match.group(2) or "").ljust(9, "0"))
+
+
+def _end_on_bye(stream: str, rtcp: bytes) -> None:
+    # Axis sends BYE and keeps the connection open, for example when the image rotation changes.
+    if is_rtcp_bye(rtcp):
+        raise StreamError(f"the camera ended the {stream} stream (RTCP BYE)")
 
 
 class StartCancelledError(Exception):
@@ -275,13 +282,17 @@ class StreamSession:
                 decoder.thread_type = "SLICE"  # frame threading adds a frame of latency per thread
                 self._decoder = decoder
             assembler = AccessUnitAssembler(codec, sdp_parameter_sets(codec, video.fmtp), self._on_access_unit)
-            handlers[connection.setup(video.control, 0)] = assembler.push
+            channel = connection.setup(video.control, 0)
+            handlers[channel] = assembler.push
+            handlers[channel + 1] = partial(_end_on_bye, "video")
             self.video_codec = codec
         if self.config.metadata:
             metadata = next((media for media in medias if media.kind == "application"), None)
             if metadata is None:
                 raise StreamError("the stream has no scene metadata; Axis URLs need analytics=polygon")
-            handlers[connection.setup(metadata.control, 2)] = MetadataAssembler(self._on_document).push
+            channel = connection.setup(metadata.control, 2)
+            handlers[channel] = MetadataAssembler(self._on_document).push
+            handlers[channel + 1] = partial(_end_on_bye, "metadata")
         connection.play(aggregate_url)
         return handlers
 

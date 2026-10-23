@@ -245,6 +245,8 @@ class RtspConnection:
                 self._nc = 0
             self._keepalive_retried = True
             self.keepalive()
+        elif status == 454:
+            raise StreamError("the camera ended the RTSP session (454 Session Not Found)")
         elif status != 200:
             logger.warning("RTSP keepalive answered %s %s", status, reason)
         else:

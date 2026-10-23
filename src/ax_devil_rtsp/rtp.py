@@ -53,6 +53,16 @@ def parse_rtp(packet: bytes) -> RtpPacket:
     return RtpPacket(bool(b1 & 0x80), sequence, timestamp, capture_time_ns, memoryview(packet)[offset:end])
 
 
+def is_rtcp_bye(packet: bytes) -> bool:
+    """Whether a compound RTCP packet contains a BYE, which ends its RTP stream (RFC 3550 section 6.6)."""
+    offset = 0
+    while offset + 4 <= len(packet):
+        if packet[offset + 1] == 203:
+            return True
+        offset += 4 + (((packet[offset + 2] << 8) | packet[offset + 3]) << 2)
+    return False
+
+
 def sdp_parameter_sets(codec: str, fmtp: dict[str, str]) -> bytes:
     """Return the Annex-B parameter sets announced in an SDP fmtp line."""
     keys = ("sprop-parameter-sets",) if codec == "h264" else ("sprop-vps", "sprop-sps", "sprop-pps")

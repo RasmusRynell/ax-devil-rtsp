@@ -89,8 +89,9 @@ that session and is reported once with its original cause; it does not affect ot
 sessions.
 
 **Adapter Failure**:
-A connection, authentication, protocol, missing-stream, end-of-stream, no-data timeout or
-internal failure detected by the library. It is reported as a credential-safe
+A connection, authentication, protocol, missing-stream, end-of-stream (closed connection,
+RTCP BYE on any requested track, or an expired RTSP session), no-data timeout or internal
+failure detected by the library. It is reported as a credential-safe
 `StreamError`; the raw third-party exception is neither retained nor chained. A single
 undecodable access unit is skipped with a warning instead.
 

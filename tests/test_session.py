@@ -194,6 +194,41 @@ def test_camera_closing_the_connection_is_a_failure() -> None:
     assert "closed" in str(received.failures[0])
 
 
+def test_rtcp_bye_ends_the_session_while_the_connection_stays_open(h264_units: list[bytes]) -> None:
+    sender_report = bytes([0x80, 200, 0, 6]) + bytes(24)
+    bye = bytes([0x81, 203, 0, 1, 0, 0, 0, 1])
+    packets = video_packets("h264", h264_units)
+    camera = FakeCamera(
+        sdp("h264", metadata=False), packets[:10] + [(1, sender_report)] + packets[10:] + [(1, sender_report + bye)]
+    )
+    received = Received(frames=99)
+
+    run(camera, StreamConfig(video=VideoOutput.ENCODED), received)
+
+    assert len(received.video) == FRAMES
+    assert [str(failure) for failure in received.failures] == ["the camera ended the video stream (RTCP BYE)"]
+
+
+def test_keepalive_session_not_found_ends_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    camera = FakeCamera(sdp(None, metadata=True), [], session_timeout=1)
+    answer = camera._answer
+
+    def expire(connection: socket.socket, method: str, uri: str, headers: Any) -> None:
+        if method != "GET_PARAMETER":
+            answer(connection, method, uri, headers)
+            return
+        camera._send(connection, f"RTSP/1.0 454 Session Not Found\r\nCSeq: {headers['CSeq']}\r\n\r\n")
+
+    monkeypatch.setattr(camera, "_answer", expire)
+    received = Received(documents=1)
+
+    run(camera, StreamConfig(video=None, metadata=True, timeout=3), received)
+
+    assert [str(failure) for failure in received.failures] == [
+        "the camera ended the RTSP session (454 Session Not Found)"
+    ]
+
+
 def test_silent_camera_times_out() -> None:
     camera = FakeCamera(sdp(None, metadata=True), [])
     received = Received(documents=1)
