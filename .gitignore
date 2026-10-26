@@ -181,3 +181,4 @@ scripts/
 logs/
 
 docs/local/*
+!tests/tls/*.pem
