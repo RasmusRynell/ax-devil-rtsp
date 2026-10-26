@@ -64,7 +64,7 @@ The following responsibilities remain outside the core:
 These boundaries may be reconsidered only when evidence shows that a capability
 has become a major use case.
 
-Applications may provide a complete RTSP URL or, when they do not provide one, use
+Applications may provide a complete `rtsp://`, `http://` or `https://` URL or, when they do not provide one, use
 a small, pure Axis endpoint helper together with `StreamConfig` to produce a
 Generated Axis URL. `StreamConfig.video` and `StreamConfig.metadata` are the single
 source of truth for generated media selection; separate media-enable flags are not
@@ -119,8 +119,10 @@ Python-mediated conversion paths are outside the target.
 
 RTSP runs over one TCP connection with RTP and RTCP interleaved. TCP keeps packets in
 order and turns network loss into delay rather than broken frames, so there is no jitter
-buffer and no latency setting. UDP and multicast are out of scope until a real user needs
-them.
+buffer and no latency setting. An `http://` or `https://` URL carries the same session
+through an HTTP tunnel, as `ffmpeg -rtsp_transport http` does, for networks that only
+pass web ports; HTTPS verifies the camera's certificate unless `verify_tls` is off. UDP
+and multicast are out of scope until a real user needs them.
 Startup readiness uses one 15-second default across Python and CLI. It covers the full
 requested-stream readiness condition; callers may override it per session. The same
 timeout bounds how long a running session may receive no data before it fails.
@@ -161,8 +163,8 @@ mandatory queues, worker dispatch, thread handoff, pull-based delivery, a separa
 
 A session-owned sender handles RTSP keepalives independently of idle media or slow
 callbacks. It never invokes callbacks and is joined before the connection closes.
-Stopping shuts down TCP immediately instead of attempting a potentially blocking
-TEARDOWN write.
+Stopping shuts down TCP (both sockets of an HTTP tunnel) immediately instead of
+attempting a potentially blocking TEARDOWN write.
 
 `start()` should return a ready session only after the camera accepted PLAY for every
 requested stream. Readiness must not wait for the first video frame or metadata

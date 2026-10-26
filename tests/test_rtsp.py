@@ -91,8 +91,25 @@ def test_describe_resolves_relative_base_headers(header: str, monkeypatch: pytes
 def test_requests_use_the_supplied_url_without_credentials() -> None:
     connection = RtspConnection("rtsp://root:p%40ss@[::1]:8554/axis-media/media.amp?camera=2", timeout=1)
     assert connection.url == "rtsp://[::1]:8554/axis-media/media.amp?camera=2"
-    with pytest.raises(ValueError):
-        RtspConnection("http://camera/", timeout=1)
+
+
+def test_http_urls_map_to_rtsp_and_other_schemes_are_rejected() -> None:
+    assert RtspConnection("http://camera/live", timeout=1).url == "rtsp://camera/live"
+    assert RtspConnection("HTTPS://root:secret@camera:8443/live?token=1", timeout=1).url == (
+        "rtsp://camera:8443/live?token=1"
+    )
+    assert RtspConnection("http://camera/live", timeout=1).name == "http://camera/live"
+    ports = {
+        url: RtspConnection(url, timeout=1)._address for url in ("rtsp://c/", "http://c/", "https://c/", "http://c:81/")
+    }
+    assert ports == {
+        "rtsp://c/": ("c", 554),
+        "http://c/": ("c", 80),
+        "https://c/": ("c", 443),
+        "http://c:81/": ("c", 81),
+    }
+    with pytest.raises(ValueError, match="only rtsp://, http:// and https:// URLs are supported"):
+        RtspConnection("ftp://camera/", timeout=1)
 
 
 def test_axis_url_requests_exactly_the_configured_streams() -> None:

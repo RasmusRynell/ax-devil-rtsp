@@ -21,6 +21,7 @@ StreamConfig(
     metadata: bool = False,
     hwaccel: str | None = None,   # FFmpeg device type, e.g. "vaapi", "cuda"; see `ax-devil-rtsp doctor`
     timeout: float = 15.0,        # seconds to become ready, and without data before failing
+    verify_tls: bool = True,      # verify the certificate of an https:// URL; ignored for other schemes
 )
 ```
 
@@ -38,7 +39,7 @@ At least one of `video` and `metadata` must be requested.
 
 ```python
 StreamSession(
-    url: str,
+    url: str,                       # rtsp://, http:// or https:// (RTSP tunnelled over HTTP(S))
     config: StreamConfig,
     *,
     on_video: Callable[[VideoSample], None] | None = None,      # exactly when config.video is set
@@ -56,7 +57,7 @@ StreamSession(
 | `is_running` | Receive thread alive |
 | `failure` | `None`, a `StreamError`, or the exception a callback raised |
 | `video_codec` | `"h264"` or `"hevc"` after `start()`, else `None` |
-| `name` | The URL without credentials |
+| `name` | The URL without credentials and query, with its original scheme |
 
 Callbacks run on the session's own receive thread, one at a time, in stream order. No queue sits in between: a slow
 callback slows its own session only. Delivered objects belong to the receiver.

@@ -10,14 +10,15 @@ import logging
 import re
 import secrets
 import socket
+import ssl
 import threading
-from typing import NamedTuple, cast
+from typing import NamedTuple, Protocol, cast
 from urllib.parse import unquote, urljoin, urlsplit
 
 logger = logging.getLogger(__name__)
 
 USER_AGENT = "ax-devil-rtsp"
-_DEFAULT_PORT = 554
+_DEFAULT_PORTS = {"rtsp": 554, "http": 80, "https": 443}
 
 
 class StreamError(Exception):
@@ -113,25 +114,219 @@ def _pick_challenge(headers: list[str]) -> tuple[str, dict[str, str]] | None:
     return next((challenge for challenge in challenges if challenge[0] == "basic"), None)
 
 
+def _authorization(
+    username: str, password: str, challenge: tuple[str, dict[str, str]], method: str, uri: str, nc: int
+) -> str:
+    """Return the Authorization header value answering `challenge`; `nc` counts the uses of its nonce."""
+    scheme, params = challenge
+    if scheme == "basic":
+        return f"Basic {base64.b64encode(f'{username}:{password}'.encode()).decode()}"
+    realm, nonce = params.get("realm", ""), params.get("nonce", "")
+    fields = [f'username="{username}"', f'realm="{realm}"', f'nonce="{nonce}"', f'uri="{uri}"']
+    if "auth" in (qop.strip() for qop in params.get("qop", "").split(",")):
+        nc_value, cnonce = f"{nc:08x}", secrets.token_hex(8)
+        response = digest_response(
+            username, password, realm, nonce, method, uri, qop="auth", nc=nc_value, cnonce=cnonce
+        )
+        fields += [f'response="{response}"', "qop=auth", f"nc={nc_value}", f'cnonce="{cnonce}"']
+    else:
+        fields.append(f'response="{digest_response(username, password, realm, nonce, method, uri)}"')
+    if "opaque" in params:
+        fields.append(f'opaque="{params["opaque"]}"')
+    if "algorithm" in params:
+        fields.append(f"algorithm={params['algorithm']}")
+    return f"Digest {', '.join(fields)}"
+
+
+class _Transport(Protocol):
+    def sendall(self, data: bytes, /) -> object: ...
+
+    def shutdown(self, how: int, /) -> object: ...
+
+    def close(self) -> object: ...
+
+
+class _HttpTunnel:
+    """RTSP over HTTP: replies arrive on the body of a GET response, requests leave base64-encoded in a POST body.
+
+    `shutdown()` may be called from another thread, also while `connect()` is still running.
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        netloc: str,
+        target: str,
+        ssl_context: ssl.SSLContext | None,
+        timeout: float,
+        username: str,
+        password: str,
+    ) -> None:
+        self._host = host
+        self._port = port
+        self._netloc = netloc
+        self._target = target
+        self._ssl_context = ssl_context
+        self._timeout = timeout
+        self._username = username
+        self._password = password
+        self._cookie = secrets.token_hex(8)
+        self._stopped = False
+        self._sockets: list[socket.socket] = []
+        self._readers: list[io.BufferedReader] = []
+        self._post: socket.socket | None = None
+
+    def connect(self) -> io.BufferedReader:
+        """Open both HTTP connections and return the GET reader positioned at the start of the RTSP stream."""
+        challenge: tuple[str, dict[str, str]] | None = None
+        nc = 0
+        while True:
+            authorization = None
+            if challenge is not None:
+                nc += 1
+                authorization = _authorization(self._username, self._password, challenge, "GET", self._target, nc)
+            get = self._open()
+            lines = [
+                f"GET {self._target} HTTP/1.0",
+                f"Host: {self._netloc}",
+                f"User-Agent: {USER_AGENT}",
+                f"x-sessioncookie: {self._cookie}",
+                "Accept: application/x-rtsp-tunnelled",
+                "Pragma: no-cache",
+                "Cache-Control: no-cache",
+            ]
+            if authorization is not None:
+                lines.append(f"Authorization: {authorization}")
+            get.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
+            self._check()
+            reader = cast(io.BufferedReader, get.makefile("rb", buffering=1 << 16))
+            self._readers.append(reader)
+            status, reason, headers = self._read_head(reader)
+            self._check()
+            if status != 401 or challenge is not None or not (self._username or self._password):
+                break
+            challenge = _pick_challenge(headers.get_all("WWW-Authenticate") or [])
+            if challenge is None:
+                break
+            reader.close()
+            get.close()
+        if status == 401:
+            hint = "check the username and password" if self._username else "the URL has no credentials"
+            raise StreamError(f"HTTP tunnel was refused with 401 {reason}: {hint}")
+        if status != 200:
+            raise StreamError(f"HTTP tunnel failed with {status} {reason}")
+        if "chunked" in headers.get("Transfer-Encoding", "").lower():
+            raise StreamError("HTTP tunnel uses chunked transfer encoding, which is not supported")
+        lines = [
+            f"POST {self._target} HTTP/1.0",
+            f"Host: {self._netloc}",
+            f"User-Agent: {USER_AGENT}",
+            f"x-sessioncookie: {self._cookie}",
+            "Content-Type: application/x-rtsp-tunnelled",
+            "Pragma: no-cache",
+            "Cache-Control: no-cache",
+            "Content-Length: 32767",
+            "Expires: Sun, 9 Jan 1972 00:00:00 GMT",
+        ]
+        if challenge is not None:
+            nc += 1
+            lines.append(
+                "Authorization: " + _authorization(self._username, self._password, challenge, "POST", self._target, nc)
+            )
+        post = self._open()
+        post.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
+        self._post = post
+        self._check()
+        return reader
+
+    def sendall(self, data: bytes) -> None:
+        """Send one whole RTSP message."""
+        assert self._post is not None
+        self._post.sendall(base64.b64encode(data))
+
+    def shutdown(self, how: int) -> None:
+        """Unblock any thread waiting on the connections, also one that is still connecting; never raises."""
+        self._stopped = True
+        for sock in tuple(self._sockets):
+            try:
+                sock.shutdown(how)
+            except OSError:
+                pass
+
+    def close(self) -> None:
+        """Release both connections."""
+        for reader in tuple(self._readers):
+            reader.close()
+        for sock in tuple(self._sockets):
+            sock.close()
+
+    def _check(self) -> None:
+        if self._stopped:
+            raise StreamError("the connection was stopped")
+
+    def _open(self) -> socket.socket:
+        raw = socket.create_connection((self._host, self._port), timeout=self._timeout)
+        sock = raw
+        try:
+            raw.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 << 20)
+            raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            if self._ssl_context is not None:
+                sock = self._ssl_context.wrap_socket(raw, server_hostname=self._host, do_handshake_on_connect=False)
+            self._sockets.append(sock)
+            self._check()
+            if isinstance(sock, ssl.SSLSocket):
+                sock.do_handshake()
+        except ssl.SSLCertVerificationError:
+            sock.close()
+            raise StreamError(
+                f"TLS certificate of {self._host} was not accepted: fix the certificate or set verify_tls=False"
+            ) from None
+        except BaseException:
+            sock.close()
+            raise
+        return sock
+
+    def _read_head(self, reader: io.BufferedReader) -> tuple[int, str, http.client.HTTPMessage]:
+        try:
+            line = reader.readline(1 << 16)
+            if not line.endswith(b"\n"):
+                raise StreamError("the camera closed the connection")
+            version, _, status = line.decode("latin-1").strip().partition(" ")
+            code, _, reason = status.partition(" ")
+            if not version.startswith("HTTP/") or not code.isdigit():
+                raise StreamError("invalid HTTP tunnel response")
+            return int(code), reason, http.client.parse_headers(reader)
+        except TimeoutError:
+            raise StreamError(f"no data received for {self._timeout:g} s") from None
+
+
 class RtspConnection:
     """One RTSP control connection that also carries the session's interleaved RTP and RTCP packets.
 
     Only `keepalive()` and `shutdown()` may be called from another thread than the one that drives the connection.
     """
 
-    def __init__(self, url: str, timeout: float) -> None:
+    def __init__(self, url: str, timeout: float, *, verify_tls: bool = True) -> None:
         parts = urlsplit(url)
-        if parts.scheme.lower() != "rtsp":
-            raise ValueError("only rtsp:// URLs are supported")
+        scheme = parts.scheme.lower()
+        if scheme not in _DEFAULT_PORTS:
+            raise ValueError("only rtsp://, http:// and https:// URLs are supported")
         if not parts.hostname:
             raise ValueError("the RTSP URL has no host")
-        self.url = parts._replace(netloc=parts.netloc.rpartition("@")[2]).geturl()
+        netloc = parts.netloc.rpartition("@")[2]
+        self.url = parts._replace(scheme="rtsp", netloc=netloc).geturl()
+        self.name = parts._replace(netloc=netloc, query="", fragment="").geturl()
         self.session_timeout = 60.0
-        self._address = (parts.hostname, parts.port or _DEFAULT_PORT)
+        self._address = (parts.hostname, parts.port or _DEFAULT_PORTS[scheme])
+        self._tunnel_netloc = netloc if scheme != "rtsp" else None
+        self._tunnel_target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+        self._tls = scheme == "https"
+        self._verify_tls = verify_tls
         self._username = unquote(parts.username or "")
         self._password = unquote(parts.password or "")
         self._timeout = timeout
-        self._sock: socket.socket | None = None
+        self._sock: _Transport | None = None
         self._reader: io.BufferedReader | None = None
         self._send_lock = threading.Lock()
         self._cseq = 0
@@ -142,7 +337,26 @@ class RtspConnection:
         self._aggregate_url = self.url
 
     def connect(self) -> None:
-        """Open the TCP connection."""
+        """Open the TCP connection, or the HTTP tunnel for an http:// or https:// URL."""
+        if self._tunnel_netloc is not None:
+            context = None
+            if self._tls:
+                context = ssl.create_default_context()
+                if not self._verify_tls:
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+            tunnel = _HttpTunnel(
+                *self._address,
+                self._tunnel_netloc,
+                self._tunnel_target,
+                context,
+                self._timeout,
+                self._username,
+                self._password,
+            )
+            self._sock = tunnel  # before connecting, so that shutdown() can interrupt a connect in progress
+            self._reader = tunnel.connect()
+            return
         sock = socket.create_connection(self._address, timeout=self._timeout)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 << 20)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -274,28 +488,10 @@ class RtspConnection:
             if self._session_id:
                 lines.append(f"Session: {self._session_id}")
             if self._challenge is not None:
-                lines.append(f"Authorization: {self._authorization(method, url)}")
+                self._nc += 1
+                lines.append(
+                    "Authorization: "
+                    + _authorization(self._username, self._password, self._challenge, method, url, self._nc)
+                )
             lines += [f"{name}: {value}" for name, value in headers.items()]
             self._sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
-
-    def _authorization(self, method: str, uri: str) -> str:
-        assert self._challenge is not None
-        scheme, params = self._challenge
-        if scheme == "basic":
-            return f"Basic {base64.b64encode(f'{self._username}:{self._password}'.encode()).decode()}"
-        user, realm, nonce = self._username, params.get("realm", ""), params.get("nonce", "")
-        fields = [f'username="{user}"', f'realm="{realm}"', f'nonce="{nonce}"', f'uri="{uri}"']
-        if "auth" in (qop.strip() for qop in params.get("qop", "").split(",")):
-            self._nc += 1
-            nc, cnonce = f"{self._nc:08x}", secrets.token_hex(8)
-            response = digest_response(
-                user, self._password, realm, nonce, method, uri, qop="auth", nc=nc, cnonce=cnonce
-            )
-            fields += [f'response="{response}"', "qop=auth", f"nc={nc}", f'cnonce="{cnonce}"']
-        else:
-            fields.append(f'response="{digest_response(user, self._password, realm, nonce, method, uri)}"')
-        if "opaque" in params:
-            fields.append(f'opaque="{params["opaque"]}"')
-        if "algorithm" in params:
-            fields.append(f"algorithm={params['algorithm']}")
-        return f"Digest {', '.join(fields)}"

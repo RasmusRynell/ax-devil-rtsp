@@ -7,7 +7,9 @@ from one RTSP endpoint. Applications coordinate multiple independent sessions.
 
 **Stream Session**:
 A one-shot RTSP connection to one endpoint with a fixed video and metadata configuration.
-RTSP control, RTP and RTCP share one TCP connection (interleaved); UDP is not used.
+RTSP control, RTP and RTCP share one TCP connection (interleaved); UDP is not used. For an
+`http://` or `https://` URL that connection is an HTTP tunnel (a GET carrying responses and media, a
+POST carrying base64-encoded requests); TLS verification is a session setting, `verify_tls`.
 _Avoid_: Retriever, client, worker
 
 **Receive Thread**:
@@ -19,11 +21,14 @@ while media reads or callbacks are blocked; it never delivers callbacks and is j
 before the connection is closed.
 
 **Supplied RTSP URL**:
-A complete RTSP URL provided by the application. Credentials in it authenticate the
-session and are removed from request lines; everything else is used exactly as supplied.
+A complete `rtsp://`, `http://` or `https://` URL provided by the application. Credentials in it
+authenticate the session and are removed from request lines; everything else is used exactly as
+supplied. The HTTP schemes select the tunnel, and the RTSP requests inside it carry the same URL
+with an `rtsp` scheme.
 Axis URL construction settings are not merged into it, and the library does not inspect
 it to infer which media streams the camera will provide. The session name, used in logs
-and errors, leaves out its credentials and query, since a query can carry access tokens.
+and errors, keeps the supplied scheme and leaves out its credentials and query, since a query
+can carry access tokens.
 
 **Generated Axis URL**:
 A pure URL produced from structured Axis address, credential, source, and media settings
@@ -75,7 +80,7 @@ _Avoid_: First frame, first document
 
 **Requested Stop**:
 A nonblocking, idempotent application request that ends the session by shutting down the
-socket. No TEARDOWN request is sent because a socket write could block. It is safe inside stream callbacks;
+socket, or both tunnel sockets. No TEARDOWN request is sent because a socket write could block. It is safe inside stream callbacks;
 synchronous waiting belongs to an external application thread.
 
 **Startup Cancellation**:

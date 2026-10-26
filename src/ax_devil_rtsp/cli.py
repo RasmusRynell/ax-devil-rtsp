@@ -68,7 +68,7 @@ def cli() -> None:
 
 
 @cli.command()
-@click.option("--url", help="Complete RTSP URL, used as given instead of the device options.")
+@click.option("--url", help="Complete rtsp://, http:// or https:// URL, used as given instead of the device options.")
 @click.option("-a", "--device-ip", envvar="AX_DEVIL_TARGET_ADDR", show_envvar=True, help="Camera address.")
 @click.option("-u", "--device-username", envvar="AX_DEVIL_TARGET_USER", show_envvar=True, default="")
 @click.option("-p", "--device-password", envvar="AX_DEVIL_TARGET_PASS", show_envvar=True, default="")
@@ -90,6 +90,12 @@ def cli() -> None:
 @click.option("--metadata/--no-metadata", default=True, show_default=True, help="Receive scene metadata.")
 @click.option("--hwaccel", help="Hardware decoding device type, see `ax-devil-rtsp doctor`.")
 @click.option("--timeout", default=15.0, show_default=True, help="Seconds to become ready and without data.")
+@click.option(
+    "--verify-tls/--no-verify-tls",
+    default=True,
+    show_default=True,
+    help="Verify the camera's TLS certificate for https:// URLs.",
+)
 @click.option("--display", is_flag=True, help="Show the video in a window; needs opencv-python.")
 @click.option("--print-xml", is_flag=True, help="Print every scene metadata document.")
 @click.option("--duration", type=float, help="Stop after this many seconds.")
@@ -111,6 +117,7 @@ def stream(
     metadata: bool,
     hwaccel: str | None,
     timeout: float,
+    verify_tls: bool,
     display: bool,
     print_xml: bool,
     duration: float | None,
@@ -126,6 +133,7 @@ def stream(
             metadata=metadata,
             hwaccel=hwaccel,
             timeout=timeout,
+            verify_tls=verify_tls,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from None

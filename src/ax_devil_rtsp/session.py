@@ -12,7 +12,6 @@ from enum import Enum
 from functools import partial
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar, cast
-from urllib.parse import urlsplit
 
 import av
 from av.codec.hwaccel import HWAccel
@@ -61,12 +60,14 @@ class StreamConfig:
         metadata: Whether to receive the Axis scene metadata stream.
         hwaccel: FFmpeg hardware device type for decoding, such as "vaapi" or "cuda"; see `ax-devil-rtsp doctor`.
         timeout: Seconds allowed to become ready, and without any data from the camera before the session fails.
+        verify_tls: Whether to verify the camera's TLS certificate for an https:// URL; ignored for other URLs.
     """
 
     video: VideoOutput | None = VideoOutput.RGB24
     metadata: bool = False
     hwaccel: str | None = None
     timeout: float = 15.0
+    verify_tls: bool = True
 
     def __post_init__(self) -> None:
         if self.video is None and not self.metadata:
@@ -143,7 +144,8 @@ class StreamSession:
     connection, the camera or decoding fails, it reports a `StreamError` instead.
 
     Args:
-        url: Complete RTSP URL, used as given. Credentials in it are used for authentication and never logged.
+        url: Complete rtsp://, http:// or https:// URL, used as given; the last two tunnel RTSP over HTTP(S).
+            Credentials in it are used for authentication and never logged.
             `name`, which logs and errors use, also leaves out the query, since it can carry access tokens.
         config: What to receive and how.
         on_video: Called with each `VideoSample`; required exactly when `config.video` is set.
@@ -167,8 +169,8 @@ class StreamSession:
         self.config = config
         self.video_codec: str | None = None
         self.failure: BaseException | None = None
-        self._connection = RtspConnection(url, config.timeout)
-        self.name = urlsplit(self._connection.url)._replace(query="", fragment="").geturl()
+        self._connection = RtspConnection(url, config.timeout, verify_tls=config.verify_tls)
+        self.name = self._connection.name
         self._on_video = on_video
         self._on_metadata = on_metadata
         self._on_failure = on_failure
