@@ -6,7 +6,7 @@ description: 'Use the ax-devil-rtsp package (CLI and Python API) to stream RTSP 
 # ax-devil-rtsp
 
 Python package for receiving RTSP video and AXIS Scene Metadata from Axis cameras. Its own RTSP/RTP client runs over
-TCP; PyAV (FFmpeg) decodes. Video and metadata arrive through callbacks on one receive thread per session, with
+TCP, optionally tunnelled through HTTP(S); PyAV (FFmpeg) decodes. Video and metadata arrive through callbacks on one receive thread per session, with
 per-frame capture times for matching the two.
 
 **Package**: `ax-devil-rtsp` (PyPI)
@@ -59,6 +59,8 @@ Load only the reference you need:
   Pass `on_video` exactly when `video` is set and `on_metadata` exactly when `metadata` is true.
 - **`VideoOutput`** fixes what `VideoSample.data` is: `ENCODED` (Annex-B bytes), `DECODED` (`av.VideoFrame`), or a
   NumPy array in `RGB24`, `BGR24`, `RGBA`, `BGRA` or `GRAY`.
+- **URL schemes**: `rtsp://`, `http://` and `https://`; the last two tunnel RTSP over HTTP(S). For a self-signed
+  HTTPS camera set `StreamConfig(verify_tls=False)` (CLI `--no-verify-tls`).
 - **Threads**: callbacks run on the session's receive thread. Keep them fast; hand data off yourself.
 - **Lifecycle**: `start()` blocks until PLAY succeeded and raises `StreamError` on failure; `stop()` never blocks;
   `with session:` does both. Sessions are one-shot.

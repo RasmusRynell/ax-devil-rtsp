@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import http.client
 import re
 import socket
+import ssl
 import struct
 import threading
 import time
 from fractions import Fraction
+from pathlib import Path
+from typing import IO, Literal
 
 import av
 import numpy as np
@@ -19,6 +24,8 @@ BASE_UNIX_SECONDS = 1_800_000_000
 FRAME_RGB = (200, 50, 100)
 NONCE = "fake-nonce"
 REALM = "fake-camera"
+# PEM with certificate and key for https mode; the session fixture in conftest.py generates it.
+CERTIFICATE: Path | None = None
 
 
 def encode_video(codec: str, count: int, size: int = 64) -> list[bytes]:
@@ -124,7 +131,12 @@ def sdp(codec: str | None, metadata: bool) -> str:
 
 
 class FakeCamera:
-    """Serves one RTSP connection on localhost and records the requests it receives."""
+    """Serves one RTSP session on localhost and records the requests it receives.
+
+    `transport` is plain RTSP over TCP, or RTSP tunnelled over HTTP or HTTPS (a GET connection carrying the responses
+    and media, a POST connection carrying base64-encoded requests). `http_auth` makes the tunnel demand HTTP Basic
+    credentials on both connections.
+    """
 
     def __init__(
         self,
@@ -137,6 +149,8 @@ class FakeCamera:
         packet_interval: float = 0.0,
         close_after_packets: bool = False,
         rotate_nonce: bool = False,
+        transport: Literal["rtsp", "http", "https"] = "rtsp",
+        http_auth: bool = False,
     ) -> None:
         self.sdp = sdp
         self.packets = packets
@@ -147,14 +161,23 @@ class FakeCamera:
         self.session_timeout = session_timeout
         self.packet_interval = packet_interval
         self.close_after_packets = close_after_packets
+        self.transport = transport
+        self.http_auth = http_auth
+        self.http_requests: list[tuple[str, str, http.client.HTTPMessage]] = []
         self.requests: list[str] = []
         self.request_uris: list[str] = []
         self.keepalive_received = threading.Event()
         self._listener = socket.create_server(("127.0.0.1", 0))
-        self._listener.settimeout(10)
+        self._listener.settimeout(0.1 if transport != "rtsp" else 10)
+        self._tls: ssl.SSLContext | None = None
+        if transport == "https":
+            self._tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            assert CERTIFICATE is not None, "the tls_certificate fixture has not run"
+            self._tls.load_cert_chain(CERTIFICATE)
+        self._finished = threading.Event()
         self.port = self._listener.getsockname()[1]
         self._send_lock = threading.Lock()
-        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread = threading.Thread(target=self._serve if transport == "rtsp" else self._serve_tunnel, daemon=True)
         self._thread.start()
 
     def url(self, username: str | None = None, password: str | None = None) -> str:
@@ -162,10 +185,11 @@ class FakeCamera:
         username = self.username if username is None else username
         password = self.password if password is None else password
         credentials = f"{username}:{password}@" if username or password else ""
-        return f"rtsp://{credentials}127.0.0.1:{self.port}/axis-media/media.amp?camera=1"
+        return f"{self.transport}://{credentials}127.0.0.1:{self.port}/axis-media/media.amp?camera=1"
 
     def join(self) -> None:
         """Wait until the client has disconnected."""
+        self._finished.set()
         self._thread.join(10)
         self._listener.close()
 
@@ -174,7 +198,12 @@ class FakeCamera:
             connection, _ = self._listener.accept()
         except OSError:
             return
-        with connection, connection.makefile("rb") as reader:
+        with connection:
+            self._handle_requests(connection, connection)
+
+    def _handle_requests(self, source: socket.socket, connection: socket.socket) -> None:
+        """Read RTSP requests from `source` and answer them on `connection` until the client disconnects."""
+        with source.makefile("rb") as reader:
             try:
                 while line := reader.readline():
                     method, uri, _ = line.decode().split(" ", 2)
@@ -184,6 +213,95 @@ class FakeCamera:
                     self._answer(connection, method, uri, headers)
             except OSError:
                 pass
+
+    def _serve_tunnel(self) -> None:
+        get: socket.socket | None = None
+        cookie = ""
+        try:
+            while not self._finished.is_set():
+                try:
+                    raw, _ = self._listener.accept()
+                except TimeoutError:
+                    continue
+                except OSError:
+                    return
+                connection = self._accept_tls(raw)
+                if connection is None:
+                    continue
+                reader = connection.makefile("rb")
+                try:
+                    method, target, headers = self._read_http_request(reader)
+                except (OSError, ValueError):
+                    connection.close()
+                    continue
+                connection.settimeout(None)
+                self.http_requests.append((method, target, headers))
+                if self.http_auth and not self._http_authorized(headers.get("Authorization", "")):
+                    self._send_http(connection, "401 Unauthorized", 'WWW-Authenticate: Basic realm="fake-camera"\r\n')
+                elif method == "GET":
+                    self._send_http(connection, "200 OK", "Content-Type: application/x-rtsp-tunnelled\r\n")
+                    get, cookie = connection, headers.get("x-sessioncookie", "")
+                    continue
+                elif method == "POST" and get is not None and headers.get("x-sessioncookie") == cookie:
+                    self._relay_post(reader, connection, get)
+                    return
+                else:
+                    self._send_http(connection, "400 Bad Request")
+                connection.close()
+        finally:
+            if get is not None:
+                get.close()
+
+    def _accept_tls(self, raw: socket.socket) -> socket.socket | None:
+        raw.settimeout(5)
+        if self._tls is None:
+            return raw
+        try:
+            return self._tls.wrap_socket(raw, server_side=True)
+        except OSError:
+            raw.close()
+            return None
+
+    @staticmethod
+    def _read_http_request(reader: IO[bytes]) -> tuple[str, str, http.client.HTTPMessage]:
+        method, target, _ = reader.readline().decode().split(" ", 2)
+        return method, target, http.client.parse_headers(reader)
+
+    def _http_authorized(self, header: str) -> bool:
+        expected = base64.b64encode(f"{self.username}:{self.password}".encode()).decode()
+        return header == f"Basic {expected}"
+
+    @staticmethod
+    def _send_http(connection: socket.socket, status: str, headers: str = "") -> None:
+        try:
+            connection.sendall(f"HTTP/1.0 {status}\r\n{headers}Content-Length: 0\r\n\r\n".encode())
+        except OSError:
+            pass
+
+    def _relay_post(self, reader: IO[bytes], post: socket.socket, get: socket.socket) -> None:
+        """Decode the POST body into a socket pair and answer the requests read from it on the GET connection."""
+        incoming, sink = socket.socketpair()
+
+        def decode() -> None:
+            try:
+                while len(chunk := reader.read(4)) == 4:
+                    sink.sendall(base64.b64decode(chunk, validate=True))
+            except (OSError, binascii.Error, ValueError):
+                pass
+            finally:
+                sink.close()
+
+        threading.Thread(target=decode, daemon=True).start()
+        try:
+            with incoming:
+                self._handle_requests(incoming, get)
+        finally:
+            for connection in (get, post):
+                try:
+                    connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                connection.close()
 
     def _answer(self, connection: socket.socket, method: str, uri: str, headers: http.client.HTTPMessage) -> None:
         cseq = headers.get("CSeq", "0")

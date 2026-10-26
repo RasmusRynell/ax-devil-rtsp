@@ -24,6 +24,7 @@ display = [
 ]
 dev = [
     "pytest>=7.0",
+    "cryptography",
     "ruff",
     "mypy",
 ]
