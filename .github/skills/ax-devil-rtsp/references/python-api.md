@@ -85,10 +85,11 @@ build_axis_rtsp_url(
     *,
     username: str = "",
     password: str = "",         # percent-encoded into the URL
-    port: int | None = None,
+    port: int | None = None,    # default 554, or 80 / 443 when tunneling
     camera: int | str = 1,
     resolution: str | None = None,   # e.g. "1280x720"
     capture_time: bool = True,       # onvifreplayext=1, needed for capture_time_ns
+    tunnel: "http" | "https" | None = None,  # tunnel RTSP through the web server, e.g. behind a firewall
 ) -> str
 ```
 

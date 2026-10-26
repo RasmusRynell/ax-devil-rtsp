@@ -80,3 +80,10 @@ def test_doctor_missing_decoder_remains_an_error(monkeypatch: pytest.MonkeyPatch
     assert "MISSING  h264 decoder" in result.output
     assert "reinstall PyAV" in result.output
     assert calls == ["hevc"]
+
+
+def test_stream_tunnel_builds_the_url_and_does_not_rewrite_a_given_one() -> None:
+    result = CliRunner().invoke(cli, ["stream", "--url", "rtsp://camera/", "--tunnel", "https"])
+
+    assert result.exit_code == 2
+    assert "put the scheme in --url" in result.output

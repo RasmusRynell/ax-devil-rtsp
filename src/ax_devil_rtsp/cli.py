@@ -7,7 +7,7 @@ import platform
 import time
 from collections import deque
 from statistics import median
-from typing import Any
+from typing import Any, Literal
 
 import click
 
@@ -75,6 +75,11 @@ def cli() -> None:
 @click.option("--camera", default="1", show_default=True, help="Video source on the camera.")
 @click.option("--resolution", help="Video resolution such as 1280x720; the camera default when omitted.")
 @click.option(
+    "--tunnel",
+    type=click.Choice(["http", "https"]),
+    help="Tunnel RTSP through the camera's web server (port 80 or 443), for networks where only web ports are open.",
+)
+@click.option(
     "--capture-time/--no-capture-time",
     default=True,
     show_default=True,
@@ -112,6 +117,7 @@ def stream(
     device_password: str,
     camera: str,
     resolution: str | None,
+    tunnel: Literal["http", "https"] | None,
     capture_time: bool,
     video: str,
     metadata: bool,
@@ -137,6 +143,8 @@ def stream(
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from None
+    if url is not None and tunnel is not None:
+        raise click.UsageError("--tunnel builds the URL from the device options; put the scheme in --url instead")
     if url is None:
         if not device_ip:
             raise click.UsageError("give --url or --device-ip (or set AX_DEVIL_TARGET_ADDR)")
@@ -148,6 +156,7 @@ def stream(
             camera=camera,
             resolution=resolution,
             capture_time=capture_time,
+            tunnel=tunnel,
         )
     cv2 = _import_cv2() if display else None
 

@@ -121,7 +121,8 @@ millisecond, the precision of `UtcTime`. `ax-devil-rtsp stream` prints this dist
 
 `build_axis_rtsp_url(host, config, ...)` builds an Axis `axis-media/media.amp` URL that asks for exactly the streams in
 `config`: `analytics=polygon` when metadata is requested, `video=0` when video is not. Options: `username`,
-`password`, `port`, `camera` (video source), `resolution` and `capture_time`.
+`password`, `port`, `camera` (video source), `resolution`, `capture_time` and `tunnel` (`"http"` or `"https"`
+to tunnel through the camera's web server).
 
 Any other URL is used as given, including its credentials. `rtsp://` (port 554), `http://` (80) and `https://` (443)
 are supported, all over TCP. The last two tunnel RTSP over HTTP(S) like `ffmpeg -rtsp_transport http`, which helps
