@@ -4,7 +4,7 @@ from ._errors import StreamError
 from .session import SceneMetadata, StartCancelledError, StreamConfig, StreamSession, VideoOutput, VideoSample
 from .url import build_axis_rtsp_url
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 __all__ = [
     "SceneMetadata",
