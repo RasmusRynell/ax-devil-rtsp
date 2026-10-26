@@ -1,6 +1,6 @@
 """Receive RTSP video and Axis scene metadata from Axis cameras."""
 
-from .rtsp import StreamError
+from ._errors import StreamError
 from .session import SceneMetadata, StartCancelledError, StreamConfig, StreamSession, VideoOutput, VideoSample
 from .url import build_axis_rtsp_url
 

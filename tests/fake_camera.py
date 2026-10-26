@@ -18,7 +18,7 @@ from typing import IO, Literal
 import av
 import numpy as np
 
-from ax_devil_rtsp.rtsp import digest_response
+from ax_devil_rtsp._auth import digest_response
 
 BASE_UNIX_SECONDS = 1_800_000_000
 FRAME_RGB = (200, 50, 100)

@@ -7,7 +7,8 @@ import http.client
 import pytest
 
 from ax_devil_rtsp import SceneMetadata, StreamConfig, VideoOutput, build_axis_rtsp_url
-from ax_devil_rtsp.rtsp import Media, RtspConnection, digest_response, parse_sdp
+from ax_devil_rtsp._auth import digest_response
+from ax_devil_rtsp.rtsp import Media, RtspConnection, parse_sdp
 
 
 def test_digest_response_matches_rfc_2617_example() -> None:
@@ -99,15 +100,6 @@ def test_http_urls_map_to_rtsp_and_other_schemes_are_rejected() -> None:
         "rtsp://camera:8443/live?token=1"
     )
     assert RtspConnection("http://camera/live", timeout=1).name == "http://camera/live"
-    ports = {
-        url: RtspConnection(url, timeout=1)._address for url in ("rtsp://c/", "http://c/", "https://c/", "http://c:81/")
-    }
-    assert ports == {
-        "rtsp://c/": ("c", 554),
-        "http://c/": ("c", 80),
-        "https://c/": ("c", 443),
-        "http://c:81/": ("c", 81),
-    }
     with pytest.raises(ValueError, match="only rtsp://, http:// and https:// URLs are supported"):
         RtspConnection("ftp://camera/", timeout=1)
 

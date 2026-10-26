@@ -129,6 +129,10 @@ where only the web ports are reachable. An `https://` camera with a self-signed 
 `StreamConfig(verify_tls=False)`; the default verifies the certificate. `session.name`, which logs and errors use,
 leaves out the URL's credentials and query, since a query can carry access tokens.
 
+HTTP tunnel limits: chunked responses and redirects are unsupported. The POST uses a fixed
+`Content-Length: 32767` with no renewal when that encoded request-byte budget is exhausted;
+long-running sessions may therefore be closed by the server. See [transport ownership and limits](docs/transport.md).
+
 If a metadata stream gives `400 Bad Request`, the camera's scene metadata producer is probably disabled; enable
 `AnalyticsSceneDescription` for that channel, for example with
 `ax-devil-device-api analytics-metadata enable AnalyticsSceneDescription -c 1`.

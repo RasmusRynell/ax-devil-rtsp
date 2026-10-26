@@ -16,8 +16,9 @@ from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar, cast
 import av
 from av.codec.hwaccel import HWAccel
 
+from ._errors import StreamError
 from .rtp import AccessUnitAssembler, MetadataAssembler, is_rtcp_bye, sdp_parameter_sets
-from .rtsp import RtspConnection, StreamError
+from .rtsp import RtspConnection
 
 if TYPE_CHECKING:
     import numpy as np

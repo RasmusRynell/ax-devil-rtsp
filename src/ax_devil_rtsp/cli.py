@@ -12,7 +12,7 @@ from typing import Any
 import click
 
 from . import __version__
-from .rtsp import StreamError
+from ._errors import StreamError
 from .session import SceneMetadata, StreamConfig, StreamSession, VideoOutput, VideoSample
 from .url import build_axis_rtsp_url
 

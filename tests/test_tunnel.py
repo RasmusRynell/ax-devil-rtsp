@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import re
+import socket
+import threading
 import time
+from pathlib import Path
 from typing import Any, Literal
 
 import pytest
 from test_session import DOCUMENTS, FRAMES, SECOND, Received, run
 
-from ax_devil_rtsp import StreamConfig, StreamError, StreamSession, VideoOutput
+from ax_devil_rtsp import StartCancelledError, StreamConfig, StreamError, StreamSession, VideoOutput
 from ax_devil_rtsp.rtsp import RtspConnection
 
 from fake_camera import BASE_UNIX_SECONDS, FakeCamera, encode_video, metadata_packets, sdp, video_packets
@@ -261,3 +264,78 @@ def test_https_without_verification_streams() -> None:
 )
 def test_inner_rtsp_url(url: str, expected: str) -> None:
     assert RtspConnection(url, timeout=1).url == expected
+
+
+def test_https_with_trusted_certificate_streams(tls_certificate: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SSL_CERT_FILE", str(tls_certificate))
+    camera = FakeCamera(sdp(None, metadata=True), metadata_packets(DOCUMENTS), transport="https")
+    received = Received(documents=len(DOCUMENTS))
+    session = run(camera, StreamConfig(video=None, metadata=True), received)
+    assert session.failure is None and len(received.metadata) == len(DOCUMENTS)
+
+
+@pytest.mark.parametrize("transport", TRANSPORTS)
+@pytest.mark.parametrize("codec", ["h264", "hevc"])
+def test_tunnel_decodes_video(transport: Transport, codec: str) -> None:
+    camera = FakeCamera(
+        sdp(codec, metadata=False), video_packets(codec, encode_video(codec, FRAMES)), transport=transport
+    )
+    received = Received(frames=FRAMES)
+    session = run(camera, StreamConfig(video=VideoOutput.RGB24, verify_tls=False), received)
+    assert session.failure is None and len(received.video) == FRAMES
+    assert all(sample.data.shape == (64, 64, 3) for sample in received.video)
+    assert [sample.capture_time_ns for sample in received.video] == [(BASE_UNIX_SECONDS + i) * SECOND for i in range(5)]
+
+
+@pytest.mark.parametrize("scheme", ["rtsp", "http", "https"])
+def test_stop_during_startup_unblocks_io_and_cleans_up(scheme: str) -> None:
+    accepted = threading.Event()
+    disconnected = threading.Event()
+    failures: list[BaseException] = []
+    with socket.create_server(("127.0.0.1", 0)) as listener:
+        listener.settimeout(5)
+
+        def server() -> None:
+            peer, _ = listener.accept()
+            with peer:
+                peer.settimeout(5)
+                # Wait for DESCRIBE, HTTP GET, or the TLS ClientHello, then stall.
+                peer.recv(65536)
+                accepted.set()
+                try:
+                    while peer.recv(65536):
+                        pass
+                except ConnectionResetError:
+                    pass
+                disconnected.set()
+
+        session = StreamSession(
+            f"{scheme}://127.0.0.1:{listener.getsockname()[1]}/live",
+            StreamConfig(video=None, metadata=True, timeout=5, verify_tls=False),
+            on_metadata=print,
+        )
+
+        def start() -> None:
+            try:
+                session.start()
+            except BaseException as error:
+                failures.append(error)
+
+        serving = threading.Thread(target=server, daemon=True)
+        starting = threading.Thread(target=start, daemon=True)
+        serving.start()
+        starting.start()
+        try:
+            assert accepted.wait(3)
+            session.stop()
+            starting.join(2)
+            session.join(2)
+            assert not starting.is_alive() and not session.is_running
+            assert len(failures) == 1 and isinstance(failures[0], StartCancelledError)
+            assert session.failure is None
+            assert disconnected.wait(2)
+        finally:
+            session.stop()
+            starting.join(5)
+            session.join(5)
+            serving.join(5)
