@@ -129,6 +129,15 @@ def test_axis_url_requests_exactly_the_configured_streams() -> None:
     assert build_axis_rtsp_url("cam", video_only, capture_time=False).endswith("media.amp?camera=1&audio=0")
 
 
+def test_axis_url_can_tunnel_through_the_web_server() -> None:
+    config = StreamConfig(video=VideoOutput.ENCODED)
+    url = build_axis_rtsp_url("cam", config, port=8443, capture_time=False, tunnel="https")
+    assert url == "https://cam:8443/axis-media/media.amp?camera=1&audio=0"
+    assert build_axis_rtsp_url("cam", config, tunnel="http").startswith("http://cam/axis-media/media.amp?")
+    with pytest.raises(ValueError, match="tunnel"):
+        build_axis_rtsp_url("cam", config, tunnel="ftp")  # type: ignore[arg-type]
+
+
 def test_scene_metadata_utc_time() -> None:
     xml = '<tt:Frame UtcTime="2027-01-15T08:30:00.123456Z" Source="1">'
     assert SceneMetadata(xml, 0, None).utc_time_ns == 1_800_001_800_123_456_000

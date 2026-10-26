@@ -19,6 +19,7 @@ capture time. Ctrl+C (or `q` in the video window) stops. Exits with status 1 and
 | `-p, --device-password TEXT` | `$AX_DEVIL_TARGET_PASS` | Camera password |
 | `--camera TEXT` | `1` | Video source on the camera |
 | `--resolution TEXT` | camera default | For example `1280x720` |
+| `--tunnel [http\|https]` | | Tunnel RTSP through the camera's web server (port 80 or 443) |
 | `--capture-time / --no-capture-time` | on | Ask for per-frame capture times (`onvifreplayext=1`) |
 | `--video [encoded\|decoded\|rgb24\|bgr24\|rgba\|bgra\|gray\|none]` | `bgr24` | What each frame is delivered as |
 | `--metadata / --no-metadata` | on | Receive scene metadata |
@@ -30,7 +31,7 @@ capture time. Ctrl+C (or `q` in the video window) stops. Exits with status 1 and
 | `--duration FLOAT` | | Stop after this many seconds |
 | `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR` |
 
-Device options build an Axis URL; `--resolution`, `--camera` and `--capture-time` only apply then.
+Device options build an Axis URL; `--resolution`, `--camera`, `--capture-time` and `--tunnel` only apply then.
 
 ## `doctor`
 
