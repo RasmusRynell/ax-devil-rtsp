@@ -121,11 +121,18 @@ millisecond, the precision of `UtcTime`. `ax-devil-rtsp stream` prints this dist
 
 `build_axis_rtsp_url(host, config, ...)` builds an Axis `axis-media/media.amp` URL that asks for exactly the streams in
 `config`: `analytics=polygon` when metadata is requested, `video=0` when video is not. Options: `username`,
-`password`, `port`, `camera` (video source), `resolution` and `capture_time`.
+`password`, `port`, `camera` (video source), `resolution`, `capture_time` and `tunnel` (`"http"` or `"https"`
+to tunnel through the camera's web server).
 
-Any other RTSP URL is used as given, including its credentials. Only `rtsp://` over TCP is supported.
-`session.name`, which logs and errors use, leaves out the URL's credentials and query, since a query can carry
-access tokens.
+Any other URL is used as given, including its credentials. `rtsp://` (port 554), `http://` (80) and `https://` (443)
+are supported, all over TCP. The last two tunnel RTSP over HTTP(S) like `ffmpeg -rtsp_transport http`, which helps
+where only the web ports are reachable. An `https://` camera with a self-signed certificate needs
+`StreamConfig(verify_tls=False)`; the default verifies the certificate. `session.name`, which logs and errors use,
+leaves out the URL's credentials and query, since a query can carry access tokens.
+
+HTTP tunnel limits: chunked responses and redirects are unsupported. The POST uses a fixed
+`Content-Length: 32767` with no renewal when that encoded request-byte budget is exhausted;
+long-running sessions may therefore be closed by the server. See [transport ownership and limits](docs/transport.md).
 
 If a metadata stream gives `400 Bad Request`, the camera's scene metadata producer is probably disabled; enable
 `AnalyticsSceneDescription` for that channel, for example with
@@ -153,6 +160,9 @@ ax-devil-rtsp stream --video none --print-xml
 
 # Any RTSP URL, encoded video only
 ax-devil-rtsp stream --url "rtsp://root:secret@192.168.1.90/axis-media/media.amp" --video encoded --no-metadata
+
+# RTSP tunnelled over HTTPS, accepting a self-signed certificate
+ax-devil-rtsp stream --url "https://root:secret@192.168.1.90/axis-media/media.amp" --no-verify-tls
 
 ax-devil-rtsp doctor
 ```

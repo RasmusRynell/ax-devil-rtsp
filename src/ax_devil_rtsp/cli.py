@@ -7,12 +7,12 @@ import platform
 import time
 from collections import deque
 from statistics import median
-from typing import Any
+from typing import Any, Literal
 
 import click
 
 from . import __version__
-from .rtsp import StreamError
+from ._errors import StreamError
 from .session import SceneMetadata, StreamConfig, StreamSession, VideoOutput, VideoSample
 from .url import build_axis_rtsp_url
 
@@ -68,12 +68,17 @@ def cli() -> None:
 
 
 @cli.command()
-@click.option("--url", help="Complete RTSP URL, used as given instead of the device options.")
+@click.option("--url", help="Complete rtsp://, http:// or https:// URL, used as given instead of the device options.")
 @click.option("-a", "--device-ip", envvar="AX_DEVIL_TARGET_ADDR", show_envvar=True, help="Camera address.")
 @click.option("-u", "--device-username", envvar="AX_DEVIL_TARGET_USER", show_envvar=True, default="")
 @click.option("-p", "--device-password", envvar="AX_DEVIL_TARGET_PASS", show_envvar=True, default="")
 @click.option("--camera", default="1", show_default=True, help="Video source on the camera.")
 @click.option("--resolution", help="Video resolution such as 1280x720; the camera default when omitted.")
+@click.option(
+    "--tunnel",
+    type=click.Choice(["http", "https"]),
+    help="Tunnel RTSP through the camera's web server (port 80 or 443), for networks where only web ports are open.",
+)
 @click.option(
     "--capture-time/--no-capture-time",
     default=True,
@@ -90,6 +95,12 @@ def cli() -> None:
 @click.option("--metadata/--no-metadata", default=True, show_default=True, help="Receive scene metadata.")
 @click.option("--hwaccel", help="Hardware decoding device type, see `ax-devil-rtsp doctor`.")
 @click.option("--timeout", default=15.0, show_default=True, help="Seconds to become ready and without data.")
+@click.option(
+    "--verify-tls/--no-verify-tls",
+    default=True,
+    show_default=True,
+    help="Verify the camera's TLS certificate for https:// URLs.",
+)
 @click.option("--display", is_flag=True, help="Show the video in a window; needs opencv-python.")
 @click.option("--print-xml", is_flag=True, help="Print every scene metadata document.")
 @click.option("--duration", type=float, help="Stop after this many seconds.")
@@ -106,11 +117,13 @@ def stream(
     device_password: str,
     camera: str,
     resolution: str | None,
+    tunnel: Literal["http", "https"] | None,
     capture_time: bool,
     video: str,
     metadata: bool,
     hwaccel: str | None,
     timeout: float,
+    verify_tls: bool,
     display: bool,
     print_xml: bool,
     duration: float | None,
@@ -126,9 +139,12 @@ def stream(
             metadata=metadata,
             hwaccel=hwaccel,
             timeout=timeout,
+            verify_tls=verify_tls,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from None
+    if url is not None and tunnel is not None:
+        raise click.UsageError("--tunnel builds the URL from the device options; put the scheme in --url instead")
     if url is None:
         if not device_ip:
             raise click.UsageError("give --url or --device-ip (or set AX_DEVIL_TARGET_ADDR)")
@@ -140,6 +156,7 @@ def stream(
             camera=camera,
             resolution=resolution,
             capture_time=capture_time,
+            tunnel=tunnel,
         )
     cv2 = _import_cv2() if display else None
 

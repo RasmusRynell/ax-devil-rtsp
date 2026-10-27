@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import socket
 from types import SimpleNamespace
-from typing import Literal
+from typing import Any, Literal
 
 import av
 import pytest
@@ -11,6 +12,8 @@ from av.codec.hwaccel import HWAccel
 from click.testing import CliRunner
 
 from ax_devil_rtsp.cli import cli
+
+from fake_camera import FakeCamera, sdp
 
 
 @pytest.mark.parametrize(
@@ -80,3 +83,59 @@ def test_doctor_missing_decoder_remains_an_error(monkeypatch: pytest.MonkeyPatch
     assert "MISSING  h264 decoder" in result.output
     assert "reinstall PyAV" in result.output
     assert calls == ["hevc"]
+
+
+def test_stream_rejects_tunnel_with_a_supplied_url() -> None:
+    result = CliRunner().invoke(cli, ["stream", "--url", "rtsp://camera/", "--tunnel", "https"])
+
+    assert result.exit_code == 2
+    assert "put the scheme in --url" in result.output
+
+
+@pytest.mark.parametrize(("transport", "port"), [("rtsp", 554), ("http", 80), ("https", 443)])
+def test_stream_generated_url_reaches_camera(
+    transport: Literal["rtsp", "http", "https"], port: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    camera = FakeCamera(sdp(None, metadata=True), [], username="root", password="p@ss", transport=transport)
+    connect = socket.create_connection
+    addresses: list[tuple[str, int]] = []
+
+    def connect_locally(address: tuple[str, int], *args: Any, **kwargs: Any) -> socket.socket:
+        addresses.append(address)
+        return connect(("127.0.0.1", camera.port), *args, **kwargs)
+
+    monkeypatch.setattr(socket, "create_connection", connect_locally)
+    options = [
+        "stream",
+        "-a",
+        "camera.invalid",
+        "-u",
+        "root",
+        "-p",
+        "p@ss",
+        "--video",
+        "none",
+        "--duration",
+        "0",
+        "--timeout",
+        "2",
+    ]
+    if transport != "rtsp":
+        options += ["--tunnel", transport]
+    if transport == "https":
+        options += ["--no-verify-tls"]
+    try:
+        result = CliRunner().invoke(cli, options)
+    finally:
+        camera.join()
+
+    assert result.exit_code == 0, result.output
+    assert addresses == [("camera.invalid", port)] * (1 if transport == "rtsp" else 2)
+    assert "PLAY" in camera.requests
+    assert (
+        camera.request_uris[0]
+        == "rtsp://camera.invalid/axis-media/media.amp?camera=1&audio=0&video=0&analytics=polygon"
+    )
+    assert "p@ss" not in result.output
+    if transport != "rtsp":
+        assert [method for method, _, _ in camera.http_requests] == ["GET", "POST"]

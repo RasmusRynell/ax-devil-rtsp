@@ -7,7 +7,8 @@ import http.client
 import pytest
 
 from ax_devil_rtsp import SceneMetadata, StreamConfig, VideoOutput, build_axis_rtsp_url
-from ax_devil_rtsp.rtsp import Media, RtspConnection, digest_response, parse_sdp
+from ax_devil_rtsp._auth import digest_response
+from ax_devil_rtsp.rtsp import Media, RtspConnection, parse_sdp
 
 
 def test_digest_response_matches_rfc_2617_example() -> None:
@@ -91,8 +92,16 @@ def test_describe_resolves_relative_base_headers(header: str, monkeypatch: pytes
 def test_requests_use_the_supplied_url_without_credentials() -> None:
     connection = RtspConnection("rtsp://root:p%40ss@[::1]:8554/axis-media/media.amp?camera=2", timeout=1)
     assert connection.url == "rtsp://[::1]:8554/axis-media/media.amp?camera=2"
-    with pytest.raises(ValueError):
-        RtspConnection("http://camera/", timeout=1)
+
+
+def test_http_urls_map_to_rtsp_and_other_schemes_are_rejected() -> None:
+    assert RtspConnection("http://camera/live", timeout=1).url == "rtsp://camera/live"
+    assert RtspConnection("HTTPS://root:secret@camera:8443/live?token=1", timeout=1).url == (
+        "rtsp://camera:8443/live?token=1"
+    )
+    assert RtspConnection("http://camera/live", timeout=1).name == "http://camera/live"
+    with pytest.raises(ValueError, match="only rtsp://, http:// and https:// URLs are supported"):
+        RtspConnection("ftp://camera/", timeout=1)
 
 
 def test_axis_url_requests_exactly_the_configured_streams() -> None:
@@ -110,6 +119,15 @@ def test_axis_url_requests_exactly_the_configured_streams() -> None:
 
     video_only = StreamConfig(video=VideoOutput.ENCODED)
     assert build_axis_rtsp_url("cam", video_only, capture_time=False).endswith("media.amp?camera=1&audio=0")
+
+
+def test_axis_url_can_tunnel_through_the_web_server() -> None:
+    config = StreamConfig(video=VideoOutput.ENCODED)
+    url = build_axis_rtsp_url("cam", config, port=8443, capture_time=False, tunnel="https")
+    assert url == "https://cam:8443/axis-media/media.amp?camera=1&audio=0"
+    assert build_axis_rtsp_url("cam", config, tunnel="http").startswith("http://cam/axis-media/media.amp?")
+    with pytest.raises(ValueError, match="tunnel"):
+        build_axis_rtsp_url("cam", config, tunnel="ftp")  # type: ignore[arg-type]
 
 
 def test_scene_metadata_utc_time() -> None:
